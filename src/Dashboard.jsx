@@ -1,26 +1,28 @@
 import { useState, useEffect } from "react";
-import { C, KITCHEN } from "./config.jsx";
+import { C, KITCHEN, fetchRoutesFromDB } from "./config.jsx";
 
 export default function Dashboard({ schools, onNavigate }) {
   const [routes, setRoutes] = useState([]);
 
   useEffect(() => {
-    // Load from localStorage only — Supabase not ready yet
-    try {
-      const local = JSON.parse(localStorage.getItem("n1_routes_backup") || "[]");
-      setRoutes(Array.isArray(local) ? local : []);
-    } catch { setRoutes([]); }
+    fetchRoutesFromDB().then(data => {
+      if (Array.isArray(data) && data.length > 0) {
+        setRoutes(data);
+      } else {
+        try { setRoutes(JSON.parse(localStorage.getItem("n1_routes_backup") || "[]")); } catch { setRoutes([]); }
+      }
+    }).catch(() => {
+      try { setRoutes(JSON.parse(localStorage.getItem("n1_routes_backup") || "[]")); } catch { setRoutes([]); }
+    });
   }, []);
 
   const served = schools.filter(s => s.service_windows?.some(w => w.delivery_type === "served")).length;
   const drop = schools.filter(s => s.service_windows?.every(w => w.delivery_type === "drop")).length;
   const totalW = schools.reduce((a, s) => a + (s.service_windows?.length || 0), 0);
 
-  // Route metrics
   const totalRoutes = routes.length;
   const totalStops = routes.reduce((a, r) => a + (r.stops?.length || 0), 0);
 
-  // Personnel
   const drivers = routes.filter(r => r.driver_name).length;
   const serverNames = new Set();
   routes.forEach(r => {
@@ -28,18 +30,14 @@ export default function Dashboard({ schools, onNavigate }) {
   });
   const totalPersonnel = drivers + serverNames.size;
 
-  // Vans
   const vanSet = new Set();
   routes.forEach(r => (r.vans || []).forEach(v => { if (v.number) vanSet.add(v.number); }));
   const totalVans = vanSet.size;
 
-  // Coverage
   const assignedSchools = new Set();
   routes.forEach(r => r.stops?.forEach(s => assignedSchools.add(s.schoolName)));
   const coveredCount = assignedSchools.size;
-  const uncoveredCount = schools.length - coveredCount;
 
-  // All services coverage
   const allServices = [];
   schools.forEach(s => {
     const bk = s.service_windows?.filter(w => w.meal_type === "breakfast") || [];
@@ -57,7 +55,6 @@ export default function Dashboard({ schools, onNavigate }) {
         <div style={{ fontSize: 14, color: C.muted }}>Phoenix Region · {KITCHEN.address}</div>
       </div>
 
-      {/* School stats */}
       <div style={{ display: "flex", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
         {[
           { l: "Schools", v: schools.length, c: C.navy },
@@ -72,7 +69,6 @@ export default function Dashboard({ schools, onNavigate }) {
         ))}
       </div>
 
-      {/* Route metrics */}
       {totalRoutes > 0 && (
         <div style={{ display: "flex", gap: 14, marginBottom: 28, flexWrap: "wrap" }}>
           {[
@@ -93,7 +89,6 @@ export default function Dashboard({ schools, onNavigate }) {
         </div>
       )}
 
-      {/* Navigation cards */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
         {[
           { icon: "🏫", title: "School Profiles", desc: "Edit service windows, setup times, delivery types", page: "profiles" },
