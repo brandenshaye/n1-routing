@@ -32,3 +32,6 @@ dist-noenv
 # Supabase local CLI state (edge functions ARE tracked)
 supabase/.temp/
 supabase/.branches/
+
+# Vercel
+.vercel
