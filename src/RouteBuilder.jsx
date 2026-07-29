@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { C, TAG, KITCHEN, fetchRoutesFromDB, createRoute, updateRouteDB, deleteRouteDB, deleteAllRoutes } from "./config.jsx";
+import RoutePrintView from "./RoutePrintView.jsx";
 
 // ── Constants ────────────────────────────────────────────────
 const ROUTE_TYPES = [
@@ -92,13 +93,40 @@ export default function RouteBuilder({ schools, onNavigate }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("all");
   const [searchText, setSearchText] = useState("");
-  const saveTimer = useRef(null);
+  const [saveError, setSaveError] = useState(false);
+  const [printView, setPrintView] = useState(null); // { mode: 'all'|'single', routeId? }
+  const saveTimers = useRef(new Map());   // route id -> pending timeout id
+  const pendingSaves = useRef(new Map()); // route id -> () => Promise (latest payload)
 
   // Load routes from Supabase on mount, fallback to localStorage
   useEffect(() => {
+    // Older builds never wrote server_names/vans/loading_time to the DB, so a
+    // user's entries for those may live only in THIS device's localStorage
+    // backup. Recover them — but ONLY where the DB value is empty, so we never
+    // overwrite anything already saved server-side.
+    function backupById() {
+      try {
+        const local = JSON.parse(localStorage.getItem("n1_routes_backup") || "[]");
+        const byId = {};
+        if (Array.isArray(local)) local.forEach(r => { if (r && r.id != null) byId[r.id] = r; });
+        return byId;
+      } catch { return {}; }
+    }
+    const isEmpty = v => v == null || v === "" || (Array.isArray(v) && v.filter(x => x && x.number).length === 0);
+
     fetchRoutesFromDB().then(data => {
       if (Array.isArray(data) && data.length > 0) {
-        setRoutes(data.map(r => ({ ...r, stops: r.stops || [] })));
+        const backup = backupById();
+        setRoutes(data.map(r => {
+          const merged = { ...r, stops: r.stops || [] };
+          const b = backup[r.id];
+          if (b) {
+            if (isEmpty(merged.server_names) && !isEmpty(b.server_names)) merged.server_names = b.server_names;
+            if (isEmpty(merged.vans) && !isEmpty(b.vans)) merged.vans = b.vans;
+            if (isEmpty(merged.loading_time) && !isEmpty(b.loading_time)) merged.loading_time = b.loading_time;
+          }
+          return merged;
+        }));
       } else {
         // Fallback to localStorage
         try { const local = JSON.parse(localStorage.getItem("n1_routes_backup") || "[]"); setRoutes(local); } catch {}
@@ -116,19 +144,54 @@ export default function RouteBuilder({ schools, onNavigate }) {
     if (routes.length > 0) localStorage.setItem("n1_routes_backup", JSON.stringify(routes));
   }, [routes]);
 
-  // Auto-save: debounce writes to Supabase
+  // Auto-save: debounce writes to Supabase, with ONE pending save PER route so
+  // that editing route B never cancels an unsaved edit to route A.
   function saveRoute(route) {
     if (route._local) return; // Skip Supabase for local-only routes
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      updateRouteDB(route.id, {
-        name: route.name, type: route.type, method: route.method,
-        driver_name: route.driver_name, departure_time: route.departure_time,
-        return_time: route.return_time, notes: route.notes,
-        stops: route.stops, sort_order: route.sort_order,
-      }).catch(e => console.warn("Auto-save skipped:", e));
-    }, 500);
+    const id = route.id;
+    clearTimeout(saveTimers.current.get(id));
+    // Snapshot the latest payload; a flush persists these newest values.
+    // All of these map to real columns in routing_routes — including
+    // server_names, vans and loading_time, which were previously never saved.
+    pendingSaves.current.set(id, () => updateRouteDB(id, {
+      name: route.name, type: route.type, method: route.method,
+      driver_name: route.driver_name, server_names: route.server_names,
+      departure_time: route.departure_time, return_time: route.return_time,
+      loading_time: route.loading_time, vans: route.vans,
+      notes: route.notes, stops: route.stops, sort_order: route.sort_order,
+    }));
+    saveTimers.current.set(id, setTimeout(() => runSave(id), 500));
   }
+
+  function runSave(id) {
+    saveTimers.current.delete(id);
+    const fn = pendingSaves.current.get(id);
+    pendingSaves.current.delete(id);
+    if (!fn) return;
+    fn().then(() => setSaveError(false))
+        .catch(e => { console.error("Save failed — NOT persisted to database:", e); setSaveError(true); });
+  }
+
+  // Cancel a route's pending save (e.g. when it's being deleted).
+  function cancelSave(id) {
+    clearTimeout(saveTimers.current.get(id));
+    saveTimers.current.delete(id);
+    pendingSaves.current.delete(id);
+  }
+
+  // Immediately fire every pending save — called before leaving the page so
+  // in-flight edits aren't lost when the component unmounts.
+  function flushSaves() {
+    saveTimers.current.forEach(t => clearTimeout(t));
+    saveTimers.current.clear();
+    const fns = [...pendingSaves.current.values()];
+    pendingSaves.current.clear();
+    fns.forEach(fn => fn().then(() => setSaveError(false))
+      .catch(e => { console.error("Save failed — NOT persisted to database:", e); setSaveError(true); }));
+  }
+
+  // Flush any pending saves when leaving the Route Builder.
+  useEffect(() => () => flushSaves(), []);
 
   // Coverage
   const assignedKeys = new Set();
@@ -151,7 +214,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
   async function addNewRoute() {
     const localRoute = { id: String(Date.now()), name: `Route ${routes.length + 1}`, type: "lunch_run", method: "TT", driver_name: "", server_names: "", departure_time: "", return_time: "", loading_time: "", stops: [], notes: "", sort_order: routes.length, vans: [{ number: "", size: "large" }], _local: true };
     try {
-      const result = await createRoute({ name: localRoute.name, type: "lunch_run", method: "TT", driver_name: "", departure_time: "", return_time: "", stops: [], notes: "", sort_order: routes.length });
+      const result = await createRoute({ name: localRoute.name, type: "lunch_run", method: "TT", driver_name: "", server_names: "", departure_time: "", return_time: "", loading_time: "", vans: [{ number: "", size: "large" }], stops: [], notes: "", sort_order: routes.length });
       const newRoute = Array.isArray(result) ? result[0] : result;
       if (newRoute?.id) {
         setRoutes(prev => [...prev, { ...newRoute, stops: newRoute.stops || [] }]);
@@ -165,6 +228,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
   }
 
   async function removeRoute(id) {
+    cancelSave(id); // don't let a queued save resurrect the deleted route
     try { if (!routes.find(r => r.id === id)?._local) await deleteRouteDB(id); } catch {}
     setRoutes(prev => prev.filter(r => r.id !== id));
     if (editing === id) setEditing(null);
@@ -172,6 +236,9 @@ export default function RouteBuilder({ schools, onNavigate }) {
 
   async function clearAll() {
     if (!confirm("Clear ALL routes?") || !confirm("Are you sure? This cannot be undone.")) return;
+    saveTimers.current.forEach(t => clearTimeout(t));
+    saveTimers.current.clear();
+    pendingSaves.current.clear();
     try { await deleteAllRoutes(); } catch {}
     setRoutes([]);
     setEditing(null);
@@ -264,16 +331,26 @@ export default function RouteBuilder({ schools, onNavigate }) {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300, color: C.muted, fontSize: 15 }}>Loading routes...</div>
   );
 
+  if (printView) return (
+    <RoutePrintView routes={routes} schools={schools} mode={printView.mode} routeId={printView.routeId} onClose={() => setPrintView(null)} />
+  );
+
   return (
     <div>
+      {saveError && (
+        <div style={{ background: "#fef2f2", border: `1px solid ${C.red}`, color: C.red, borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, fontWeight: 600 }}>
+          ⚠️ Changes are not saving to the server — your edits are only on this device. Please notify an admin: the database may be rejecting writes.
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <button onClick={() => onNavigate("dashboard")} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: C.muted }}>←</button>
+        <button onClick={() => { flushSaves(); onNavigate("dashboard"); }} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: C.muted }}>←</button>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800, color: C.navy }}>Route Builder</div>
           <div style={{ fontSize: 13, color: C.muted }}>{routes.length} routes · {unassignedSvcs.length} unassigned</div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {routes.length > 0 && <button onClick={() => setPrintView({ mode: "all" })} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.navy }}>🖨 Print / Export</button>}
           {routes.length > 0 && <button onClick={clearAll} style={{ background: "#fef2f2", border: `1px solid ${C.red}40`, borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.red }}>Clear All</button>}
           <button onClick={addNewRoute} style={{ background: C.teal, color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ New Route</button>
         </div>
@@ -330,8 +407,9 @@ export default function RouteBuilder({ schools, onNavigate }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <input value={editRoute.name} onChange={e => updateLocal(editing, { name: e.target.value })} style={{ border: "none", fontSize: 20, fontWeight: 800, color: C.navy, outline: "none", background: "transparent", width: "40%" }} />
                 <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => { flushSaves(); setPrintView({ mode: "single", routeId: editing }); }} style={{ background: C.light, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.navy }}>🖨 Driver Sheet</button>
                   <button onClick={() => removeRoute(editing)} style={{ background: "#fef2f2", border: `1px solid ${C.red}40`, borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.red }}>🗑️ Delete</button>
-                  <button onClick={() => setEditing(null)} style={{ background: C.navy, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Done</button>
+                  <button onClick={() => { flushSaves(); setEditing(null); }} style={{ background: C.navy, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Done</button>
                 </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
@@ -479,6 +557,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
                           {getRouteDuration(r) !== null && <TAG color={C.teal}>{formatDuration(getRouteDuration(r))}</TAG>}
                           <TAG color={getRoutePersonnel(r) > 0 ? "#a78bfa" : C.muted}>{getRoutePersonnel(r)} ppl</TAG>
                           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                            <button onClick={() => setPrintView({ mode: "single", routeId: r.id })} title="Print driver sheet" style={{ background: "#ffffff20", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "#fff", cursor: "pointer" }}>🖨</button>
                             <button onClick={() => setEditing(r.id)} style={{ background: "#ffffff20", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 11, color: "#fff", fontWeight: 600, cursor: "pointer" }}>Edit</button>
                             <button onClick={() => removeRoute(r.id)} style={{ background: "#dc262620", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "#fca5a5", cursor: "pointer" }}>🗑️</button>
                           </div>

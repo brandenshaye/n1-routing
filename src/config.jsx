@@ -105,15 +105,25 @@ export async function createRoute(data) {
     headers: { ...sbHeaders, "Prefer": "return=representation" },
     body: JSON.stringify(data),
   });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`createRoute failed (${res.status}): ${body}`);
+  }
   return res.json();
 }
 
 export async function updateRouteDB(id, updates) {
-  await fetch(`${SUPABASE_URL}/rest/v1/routing_routes?id=eq.${id}`, {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_routes?id=eq.${id}`, {
     method: "PATCH",
     headers: { ...sbHeaders, "Prefer": "return=minimal" },
     body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
   });
+  // fetch() only rejects on network failure, NOT on HTTP 4xx/5xx — so an
+  // unauthorized/rejected write would otherwise look successful. Check explicitly.
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`updateRouteDB failed (${res.status}): ${body}`);
+  }
 }
 
 export async function deleteRouteDB(id) {
