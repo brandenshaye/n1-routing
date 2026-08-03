@@ -41,7 +41,8 @@ function svc(s) { return SVC[s] || { label: s, color: "#334155" }; }
 
 // ── Print stylesheet (screen preview + print output) ────────────────────────
 const PRINT_CSS = `
-.rpv-wrap { color: #0f172a; }
+.rpv-wrap { color: #0f172a; overflow-wrap: break-word; }
+.rpv-wrap, .rpv-wrap * { box-sizing: border-box; }
 .rpv-sheet { background: #fff; }
 .rpv-tag { display: inline-block; font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px; letter-spacing: .02em; }
 .rpv-block { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; break-inside: avoid; page-break-inside: avoid; }
@@ -74,18 +75,21 @@ const PRINT_CSS = `
 
 @media screen {
   .rpv-scr-bg { background: #64748b; min-height: 100vh; padding: 24px 0 60px; }
-  .rpv-sheet { width: 8in; max-width: 94vw; margin: 0 auto; padding: 0.5in; box-shadow: 0 6px 24px rgba(0,0,0,.25); border-radius: 4px; }
+  /* Full letter width incl. the 0.5in margin, so the preview matches print exactly */
+  .rpv-sheet { width: 8.5in; max-width: 96vw; margin: 0 auto; padding: 0.5in; box-shadow: 0 6px 24px rgba(0,0,0,.25); border-radius: 4px; }
   .rpv-bar { position: sticky; top: 0; z-index: 5; background: #0f2744; color: #fff; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 20px; }
 }
 @media print {
-  html, body { background: #fff !important; }
-  #root > div { padding: 0 !important; max-width: none !important; }
+  html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  /* Neutralize the app's centered/padded container so the sheet fills the page */
+  #root > div { padding: 0 !important; margin: 0 !important; max-width: none !important; }
   .rpv-no-print { display: none !important; }
-  .rpv-scr-bg { background: #fff !important; padding: 0 !important; }
-  .rpv-sheet { width: auto !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+  .rpv-scr-bg { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+  /* Margin comes from the sheet's own padding (reliable), NOT @page margin */
+  .rpv-sheet { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0.5in !important; box-shadow: none !important; border-radius: 0 !important; }
   .rpv-dossier { page-break-after: always; }
   .rpv-dossier:last-child { page-break-after: auto; }
-  @page { size: portrait; margin: 0.5in; }
+  @page { size: letter portrait; margin: 0; }
 }
 `;
 
