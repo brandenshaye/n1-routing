@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import {
   C, TAG, fetchEmployees, fetchRoutesFromDB,
   fetchScheduleWeeks, createScheduleWeek, updateScheduleWeek, deleteScheduleWeek,
@@ -266,6 +266,92 @@ export default function ScheduleBoard({ onNavigate }) {
 
   const missingCount = employees.filter(e => e.active && !entries.some(en => en.employee_id === e.id)).length;
 
+  // Day editor panel — rendered as an accordion row directly beneath the
+  // clicked employee's row (not below the whole grid, where nobody sees it).
+  const dayEditorPanel = selEntry && selDay && (
+    <div style={{ background: C.surface, borderTop: `2px solid ${C.teal}`, borderBottom: `2px solid ${C.teal}`, padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: C.navy }}>{selEmp?.name} — {WEEKDAYS.find(d => d.key === selected.dayKey)?.label}</div>
+        {availabilityWarning(selDay, selEmp?.availability?.[selected.dayKey]) && (
+          <TAG color={C.red}>⚠ {availabilityWarning(selDay, selEmp?.availability?.[selected.dayKey])}</TAG>
+        )}
+        <button onClick={() => setSelected(null)} style={{ marginLeft: "auto", background: C.navy, color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Done</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        {DAY_STATUSES.map(s => (
+          <button key={s.value} onClick={() => updateDay(selEntry.id, selected.dayKey, { status: s.value })}
+            style={{ background: selDay.status === s.value ? s.color : C.light, color: selDay.status === s.value ? "#fff" : C.muted, border: `1px solid ${selDay.status === s.value ? s.color : C.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {selDay.status !== "off" && selDay.status !== "pto" && (
+        <>
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 12 }}>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled In</div><TimeInput value={selDay.in} onChange={v => updateDay(selEntry.id, selected.dayKey, { in: v })} /></div>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled Out</div><TimeInput value={selDay.out} onChange={v => updateDay(selEntry.id, selected.dayKey, { out: v })} /></div>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Break (min)</div>
+              <input type="number" min="0" step="5" value={selDay.break_min || 0} onChange={e => updateDay(selEntry.id, selected.dayKey, { break_min: parseInt(e.target.value) || 0 })} style={{ ...inp, width: 70 }} />
+              <div style={{ fontSize: 9, color: C.muted, marginTop: 2 }}>{(parseInt(selDay.break_min) || 0) >= 30 ? "unpaid (deducted)" : "paid (not deducted)"}</div>
+            </div>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Actual In</div><TimeInput value={selDay.actual_in} onChange={v => updateDay(selEntry.id, selected.dayKey, { actual_in: v })} /></div>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Actual Out</div><TimeInput value={selDay.actual_out} onChange={v => updateDay(selEntry.id, selected.dayKey, { actual_out: v })} /></div>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Day hours</div><div style={{ fontSize: 16, fontWeight: 800, color: C.navy, paddingTop: 3 }}>{fmtHours(dayPaidHours(selDay))}</div></div>
+          </div>
+
+          <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Assignments</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            {(selDay.assignments || []).map((a, i) => (
+              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: a.type === "route" ? C.teal + "15" : C.light, border: `1px solid ${a.type === "route" ? C.teal + "50" : C.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 600, color: a.type === "route" ? C.teal : C.navy }}>
+                {a.type === "route" ? `🚚 ${a.label || "route"}` : a.text}
+                {a.type === "text" && (
+                  <button onClick={() => setConvertIdx(convertIdx === i ? null : i)} title="Convert to a linked route (counts toward coverage)"
+                    style={{ background: convertIdx === i ? C.teal : "none", color: convertIdx === i ? "#fff" : C.teal, border: `1px solid ${C.teal}60`, borderRadius: 4, cursor: "pointer", fontWeight: 800, fontSize: 10, padding: "0 4px" }}>⇄</button>
+                )}
+                <button onClick={() => { setConvertIdx(null); updateDay(selEntry.id, selected.dayKey, { assignments: selDay.assignments.filter((_, j) => j !== i) }); }} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontWeight: 800, fontSize: 11, padding: 0 }}>×</button>
+              </span>
+            ))}
+          </div>
+          {convertIdx !== null && selDay.assignments?.[convertIdx]?.type === "text" && (
+            <div style={{ background: C.teal + "10", border: `1px solid ${C.teal}40`, borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.navy, marginBottom: 5 }}>
+                Replace “{selDay.assignments[convertIdx].text}” with a linked route (best matches first):
+              </div>
+              <select value="" onChange={e => {
+                const r = routes.find(x => x.id === e.target.value);
+                if (!r) return;
+                const assignments = selDay.assignments.map((a, j) => j === convertIdx ? { type: "route", route_id: r.id, label: r.name } : a);
+                updateDay(selEntry.id, selected.dayKey, { assignments });
+                setConvertIdx(null);
+              }} style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", width: 340, maxWidth: "100%" }}>
+                <option value="">Choose route...</option>
+                {matchRoutes(selDay.assignments[convertIdx].text, selEmp?.name).map(({ r, score }) => (
+                  <option key={r.id} value={r.id}>
+                    {score > 0 ? "★ " : ""}{r.name}{r.driver_name ? ` — ${r.driver_name}` : ""} ({(r.stops || []).map(s => s.schoolName).join(", ").slice(0, 60)})
+                  </option>
+                ))}
+              </select>
+              <button onClick={() => setConvertIdx(null)} style={{ background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer", marginLeft: 8 }}>Cancel</button>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <select value="" onChange={e => {
+              const r = routes.find(x => x.id === e.target.value);
+              if (r) updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "route", route_id: r.id, label: r.name }] });
+            }} style={{ ...inp, background: "#fff", width: 200 }}>
+              <option value="">+ Link a route...</option>
+              {routes.map(r => <option key={r.id} value={r.id}>{r.name}{r.driver_name ? ` (${r.driver_name})` : ""}</option>)}
+            </select>
+            <AddTextAssignment onAdd={text => updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "text", text }] })} />
+            <input value={selDay.note || ""} onChange={e => updateDay(selEntry.id, selected.dayKey, { note: e.target.value })} placeholder="Day note (e.g. AR 12:30-1)..." style={{ ...inp, flex: "1 1 180px" }} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div>
       {saveError && (
@@ -405,7 +491,8 @@ export default function ScheduleBoard({ onNavigate }) {
                     if (!emp) return null;
                     const t = totals.find(x => x.entry.id === en.id);
                     return (
-                      <tr key={en.id} style={{ borderBottom: `1px solid ${C.border}`, background: ri % 2 === 0 ? C.surface : C.bg }}>
+                      <Fragment key={en.id}>
+                      <tr style={{ borderBottom: `1px solid ${C.border}`, background: ri % 2 === 0 ? C.surface : C.bg }}>
                         <td style={{ padding: "6px 10px", fontWeight: 700, color: C.navy, whiteSpace: "nowrap", position: "sticky", left: 0, background: ri % 2 === 0 ? C.surface : C.bg }}>
                           {emp.name}
                           {emp.title && <div style={{ fontSize: 9, color: C.purple, fontWeight: 600 }}>{emp.title}</div>}
@@ -446,6 +533,12 @@ export default function ScheduleBoard({ onNavigate }) {
                           <button onClick={() => removePerson(en)} title="Remove from this week" style={{ background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer" }}>✕</button>
                         </td>
                       </tr>
+                      {selected?.entryId === en.id && (
+                        <tr>
+                          <td colSpan={8} style={{ padding: 0 }}>{dayEditorPanel}</td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -453,90 +546,6 @@ export default function ScheduleBoard({ onNavigate }) {
             </div>
           )}
 
-          {/* Day editor */}
-          {selEntry && selDay && (
-            <div style={{ background: C.surface, border: `2px solid ${C.teal}`, borderRadius: 12, padding: 16, marginTop: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 15, fontWeight: 800, color: C.navy }}>{selEmp?.name} — {WEEKDAYS.find(d => d.key === selected.dayKey)?.label}</div>
-                {availabilityWarning(selDay, selEmp?.availability?.[selected.dayKey]) && (
-                  <TAG color={C.red}>⚠ {availabilityWarning(selDay, selEmp?.availability?.[selected.dayKey])}</TAG>
-                )}
-                <button onClick={() => setSelected(null)} style={{ marginLeft: "auto", background: C.navy, color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Done</button>
-              </div>
-
-              <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-                {DAY_STATUSES.map(s => (
-                  <button key={s.value} onClick={() => updateDay(selEntry.id, selected.dayKey, { status: s.value })}
-                    style={{ background: selDay.status === s.value ? s.color : C.light, color: selDay.status === s.value ? "#fff" : C.muted, border: `1px solid ${selDay.status === s.value ? s.color : C.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-
-              {selDay.status !== "off" && selDay.status !== "pto" && (
-                <>
-                  <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 12 }}>
-                    <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled In</div><TimeInput value={selDay.in} onChange={v => updateDay(selEntry.id, selected.dayKey, { in: v })} /></div>
-                    <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled Out</div><TimeInput value={selDay.out} onChange={v => updateDay(selEntry.id, selected.dayKey, { out: v })} /></div>
-                    <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Break (min)</div>
-                      <input type="number" min="0" step="5" value={selDay.break_min || 0} onChange={e => updateDay(selEntry.id, selected.dayKey, { break_min: parseInt(e.target.value) || 0 })} style={{ ...inp, width: 70 }} />
-                      <div style={{ fontSize: 9, color: C.muted, marginTop: 2 }}>{(parseInt(selDay.break_min) || 0) >= 30 ? "unpaid (deducted)" : "paid (not deducted)"}</div>
-                    </div>
-                    <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Actual In</div><TimeInput value={selDay.actual_in} onChange={v => updateDay(selEntry.id, selected.dayKey, { actual_in: v })} /></div>
-                    <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Actual Out</div><TimeInput value={selDay.actual_out} onChange={v => updateDay(selEntry.id, selected.dayKey, { actual_out: v })} /></div>
-                    <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Day hours</div><div style={{ fontSize: 16, fontWeight: 800, color: C.navy, paddingTop: 3 }}>{fmtHours(dayPaidHours(selDay))}</div></div>
-                  </div>
-
-                  <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Assignments</div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                    {(selDay.assignments || []).map((a, i) => (
-                      <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: a.type === "route" ? C.teal + "15" : C.light, border: `1px solid ${a.type === "route" ? C.teal + "50" : C.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 600, color: a.type === "route" ? C.teal : C.navy }}>
-                        {a.type === "route" ? `🚚 ${a.label || "route"}` : a.text}
-                        {a.type === "text" && (
-                          <button onClick={() => setConvertIdx(convertIdx === i ? null : i)} title="Convert to a linked route (counts toward coverage)"
-                            style={{ background: convertIdx === i ? C.teal : "none", color: convertIdx === i ? "#fff" : C.teal, border: `1px solid ${C.teal}60`, borderRadius: 4, cursor: "pointer", fontWeight: 800, fontSize: 10, padding: "0 4px" }}>⇄</button>
-                        )}
-                        <button onClick={() => { setConvertIdx(null); updateDay(selEntry.id, selected.dayKey, { assignments: selDay.assignments.filter((_, j) => j !== i) }); }} style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontWeight: 800, fontSize: 11, padding: 0 }}>×</button>
-                      </span>
-                    ))}
-                  </div>
-                  {convertIdx !== null && selDay.assignments?.[convertIdx]?.type === "text" && (
-                    <div style={{ background: C.teal + "10", border: `1px solid ${C.teal}40`, borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: C.navy, marginBottom: 5 }}>
-                        Replace “{selDay.assignments[convertIdx].text}” with a linked route (best matches first):
-                      </div>
-                      <select value="" onChange={e => {
-                        const r = routes.find(x => x.id === e.target.value);
-                        if (!r) return;
-                        const assignments = selDay.assignments.map((a, j) => j === convertIdx ? { type: "route", route_id: r.id, label: r.name } : a);
-                        updateDay(selEntry.id, selected.dayKey, { assignments });
-                        setConvertIdx(null);
-                      }} style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", width: 340, maxWidth: "100%" }}>
-                        <option value="">Choose route...</option>
-                        {matchRoutes(selDay.assignments[convertIdx].text, selEmp?.name).map(({ r, score }) => (
-                          <option key={r.id} value={r.id}>
-                            {score > 0 ? "★ " : ""}{r.name}{r.driver_name ? ` — ${r.driver_name}` : ""} ({(r.stops || []).map(s => s.schoolName).join(", ").slice(0, 60)})
-                          </option>
-                        ))}
-                      </select>
-                      <button onClick={() => setConvertIdx(null)} style={{ background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer", marginLeft: 8 }}>Cancel</button>
-                    </div>
-                  )}
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <select value="" onChange={e => {
-                      const r = routes.find(x => x.id === e.target.value);
-                      if (r) updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "route", route_id: r.id, label: r.name }] });
-                    }} style={{ ...inp, background: "#fff", width: 200 }}>
-                      <option value="">+ Link a route...</option>
-                      {routes.map(r => <option key={r.id} value={r.id}>{r.name}{r.driver_name ? ` (${r.driver_name})` : ""}</option>)}
-                    </select>
-                    <AddTextAssignment onAdd={text => updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "text", text }] })} />
-                    <input value={selDay.note || ""} onChange={e => updateDay(selEntry.id, selected.dayKey, { note: e.target.value })} placeholder="Day note (e.g. AR 12:30-1)..." style={{ ...inp, flex: "1 1 180px" }} />
-                  </div>
-                </>
-              )}
-            </div>
-          )}
         </>
       )}
 
