@@ -140,6 +140,96 @@ export async function deleteAllRoutes() {
   });
 }
 
+// ── Scheduling CRUD (Supabase) ───────────────────────────────
+async function sbCheck(res, what) {
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`${what} failed (${res.status}): ${body}`);
+  }
+  return res;
+}
+
+export async function fetchEmployees() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_employees?order=sort_order,name`, { headers: sbHeaders });
+  await sbCheck(res, "fetchEmployees");
+  return res.json();
+}
+
+export async function createEmployee(data) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_employees`, {
+    method: "POST", headers: { ...sbHeaders, "Prefer": "return=representation" }, body: JSON.stringify(data),
+  });
+  await sbCheck(res, "createEmployee");
+  return res.json();
+}
+
+export async function updateEmployee(id, updates) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_employees?id=eq.${id}`, {
+    method: "PATCH", headers: { ...sbHeaders, "Prefer": "return=minimal" },
+    body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
+  });
+  await sbCheck(res, "updateEmployee");
+}
+
+export async function deleteEmployee(id) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_employees?id=eq.${id}`, { method: "DELETE", headers: sbHeaders });
+  await sbCheck(res, "deleteEmployee");
+}
+
+export async function fetchScheduleWeeks() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_weeks?order=week_start.desc`, { headers: sbHeaders });
+  await sbCheck(res, "fetchScheduleWeeks");
+  return res.json();
+}
+
+export async function createScheduleWeek(data) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_weeks`, {
+    method: "POST", headers: { ...sbHeaders, "Prefer": "return=representation" }, body: JSON.stringify(data),
+  });
+  await sbCheck(res, "createScheduleWeek");
+  return res.json();
+}
+
+export async function updateScheduleWeek(id, updates) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_weeks?id=eq.${id}`, {
+    method: "PATCH", headers: { ...sbHeaders, "Prefer": "return=minimal" },
+    body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
+  });
+  await sbCheck(res, "updateScheduleWeek");
+}
+
+export async function deleteScheduleWeek(id) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_weeks?id=eq.${id}`, { method: "DELETE", headers: sbHeaders });
+  await sbCheck(res, "deleteScheduleWeek");
+}
+
+export async function fetchScheduleEntries(weekId) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_entries?week_id=eq.${weekId}&order=sort_order`, { headers: sbHeaders });
+  await sbCheck(res, "fetchScheduleEntries");
+  return res.json();
+}
+
+export async function createScheduleEntries(rows) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_entries`, {
+    method: "POST", headers: { ...sbHeaders, "Prefer": "return=representation" }, body: JSON.stringify(rows),
+  });
+  await sbCheck(res, "createScheduleEntries");
+  return res.json();
+}
+
+export async function updateScheduleEntry(id, updates) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_entries?id=eq.${id}`, {
+    method: "PATCH", headers: { ...sbHeaders, "Prefer": "return=minimal" },
+    body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
+  });
+  await sbCheck(res, "updateScheduleEntry");
+}
+
+export async function deleteScheduleEntry(id) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_entries?id=eq.${id}`, { method: "DELETE", headers: sbHeaders });
+  await sbCheck(res, "deleteScheduleEntry");
+}
+
 // ── Distance Matrix via Supabase Edge Function ───────────────
 export async function fetchDriveMatrix(addresses) {
   const results = {};

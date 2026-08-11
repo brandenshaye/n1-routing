@@ -93,6 +93,8 @@ export default function Dashboard({ schools, onNavigate }) {
         {[
           { icon: "🏫", title: "School Profiles", desc: "Edit service windows, setup times, delivery types", page: "profiles" },
           { icon: "🗺️", title: "Route Builder", desc: `Create and manage delivery routes${totalRoutes > 0 ? ` · ${totalRoutes} routes · ${totalPersonnel} personnel` : ""}`, page: "builder" },
+          { icon: "👥", title: "Employee Roster", desc: "OPS II staff, roles, availability & notes", page: "roster" },
+          { icon: "📅", title: "Weekly Schedule", desc: "Dated schedules, OT & coverage, print for Slack", page: "schedule" },
         ].map(({ icon, title, desc, page }) => (
           <div key={page} onClick={() => onNavigate(page)} style={{
             background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14,

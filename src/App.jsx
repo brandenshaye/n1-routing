@@ -3,6 +3,8 @@ import { C, fetchSchoolsFromDB } from "./config.jsx";
 import Dashboard from "./Dashboard.jsx";
 import SchoolProfiles from "./SchoolProfiles.jsx";
 import RouteBuilder from "./RouteBuilder.jsx";
+import EmployeeRoster from "./EmployeeRoster.jsx";
+import ScheduleBoard from "./ScheduleBoard.jsx";
 
 export default function App() {
   const [page, setPage] = useState("dashboard");
@@ -41,6 +43,8 @@ export default function App() {
       {page === "dashboard" && <Dashboard schools={schools} onNavigate={setPage} />}
       {page === "profiles" && <SchoolProfiles schools={schools} onRefresh={loadSchools} onNavigate={setPage} />}
       {page === "builder" && <RouteBuilder schools={schools} onNavigate={setPage} />}
+      {page === "roster" && <EmployeeRoster onNavigate={setPage} />}
+      {page === "schedule" && <ScheduleBoard onNavigate={setPage} />}
     </div>
   );
 }
