@@ -110,7 +110,7 @@ export default function EmployeeRoster({ onNavigate }) {
               <div onClick={() => setExpanded(open ? null : emp.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", cursor: "pointer" }}>
                 <span style={{ fontWeight: 800, color: C.navy, fontSize: 14, minWidth: 140 }}>{emp.name}</span>
                 {emp.title && <TAG color={C.purple}>{emp.title}</TAG>}
-                {(emp.roles || []).map(r => <TAG key={r} color={r === "driver" ? C.teal : C.blue}>{r === "driver" ? "Driver" : "Server"}</TAG>)}
+                {(emp.roles || []).map(r => <TAG key={r} color={r === "driver" ? C.teal : C.amber}>{r === "driver" ? "Driver" : "Server"}</TAG>)}
                 {offDays.length > 0 && <span style={{ fontSize: 11, color: C.muted }}>Off: {offDays.join(", ")}</span>}
                 {emp.notes && <span title={emp.notes} style={{ fontSize: 12 }}>📝</span>}
                 <span style={{ marginLeft: "auto", color: C.muted, fontSize: 12 }}>{open ? "▲" : "▼"}</span>
@@ -131,7 +131,7 @@ export default function EmployeeRoster({ onNavigate }) {
                       <div style={{ display: "flex", gap: 6, paddingTop: 4 }}>
                         {ROLE_OPTIONS.map(r => {
                           const on = (emp.roles || []).includes(r);
-                          return <button key={r} onClick={() => toggleRole(emp, r)} style={{ background: on ? (r === "driver" ? C.teal : C.blue) : C.light, color: on ? "#fff" : C.muted, border: `1px solid ${on ? "transparent" : C.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{r === "driver" ? "Driver" : "Server"}</button>;
+                          return <button key={r} onClick={() => toggleRole(emp, r)} style={{ background: on ? (r === "driver" ? C.teal : C.amber) : C.light, color: on ? "#fff" : C.muted, border: `1px solid ${on ? "transparent" : C.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{r === "driver" ? "Driver" : "Server"}</button>;
                         })}
                       </div>
                     </div>
