@@ -201,11 +201,18 @@ export default function ScheduleBoard({ onNavigate }) {
       .map(([rid, names]) => ({ route: routes.find(r => r.id === rid), names }));
     // Only warn about missing servers on routes that ARE being driven that day
     // (fully uncovered routes are already reported above).
-    const serverShort = activeRoutes.filter(r => driversOn[r.id] && routeServerNeed[r.id] > (serversOn[r.id]?.length || 0))
-      .map(r => ({
-        route: r, need: routeServerNeed[r.id], have: serversOn[r.id]?.length || 0,
+    // Server counts in Route Builder mean TOTAL people serving including the
+    // driver (e.g. Maryvale "Driver + Server" count 2 = Lisa driving+serving
+    // plus RV). So a linked driver fills one serving slot on routes where the
+    // stop types say the driver serves.
+    const serverShort = activeRoutes.filter(r => driversOn[r.id]).map(r => {
+      const driverServes = (r.stops || []).some(s => ["driver_serves", "driver_and_server"].includes(s.serveType));
+      const have = (serversOn[r.id]?.length || 0) + (driverServes ? driversOn[r.id].length : 0);
+      return {
+        route: r, need: routeServerNeed[r.id], have,
         schools: (r.stops || []).filter(s => ["dedicated_server", "driver_and_server"].includes(s.serveType)).map(s => s.schoolName),
-      }));
+      };
+    }).filter(x => x.need > x.have);
     return { day: d, uncovered, doubles, serverShort };
   });
 
