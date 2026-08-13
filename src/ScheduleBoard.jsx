@@ -25,6 +25,7 @@ export default function ScheduleBoard({ onNavigate }) {
   const [newWeekDate, setNewWeekDate] = useState("");
   const [printing, setPrinting] = useState(false);
   const [issuesOpen, setIssuesOpen] = useState(false);
+  const [fixOpen, setFixOpen] = useState(null); // fixKey of the issue whose candidate panel is open
   const [convertIdx, setConvertIdx] = useState(null); // index of text chip being converted to a route link
   const saveTimers = useRef(new Map());
   const pendingSaves = useRef(new Map());
@@ -201,7 +202,10 @@ export default function ScheduleBoard({ onNavigate }) {
     // Only warn about missing servers on routes that ARE being driven that day
     // (fully uncovered routes are already reported above).
     const serverShort = activeRoutes.filter(r => driversOn[r.id] && routeServerNeed[r.id] > (serversOn[r.id]?.length || 0))
-      .map(r => ({ route: r, need: routeServerNeed[r.id], have: serversOn[r.id]?.length || 0 }));
+      .map(r => ({
+        route: r, need: routeServerNeed[r.id], have: serversOn[r.id]?.length || 0,
+        schools: (r.stops || []).filter(s => ["dedicated_server", "driver_and_server"].includes(s.serveType)).map(s => s.schoolName),
+      }));
     return { day: d, uncovered, doubles, serverShort };
   });
 
@@ -218,11 +222,14 @@ export default function ScheduleBoard({ onNavigate }) {
   coverage.forEach(cv => {
     if (cv.uncovered.length > 0) issues.push({
       kind: "coverage",
-      text: `${cv.day.label}: ${cv.uncovered.length} route${cv.uncovered.length > 1 ? "s" : ""} with no driver — ${cv.uncovered.slice(0, 4).map(r => r.name).join(", ")}${cv.uncovered.length > 4 ? "…" : ""}`,
+      text: `${cv.day.label}: ${cv.uncovered.length} route${cv.uncovered.length > 1 ? "s" : ""} with no driver — ${cv.uncovered.slice(0, 4).map(r => `${r.name} (${r.stops?.[0]?.schoolName || "no stops"}${(r.stops?.length || 0) > 1 ? "…" : ""})`).join(", ")}${cv.uncovered.length > 4 ? "…" : ""}`,
     });
     cv.serverShort.forEach(ss => issues.push({
       kind: "servers",
-      text: `${cv.day.label}: ${ss.route.name} needs ${ss.need} server${ss.need > 1 ? "s" : ""}, has ${ss.have}`,
+      text: `${cv.day.label}: ${ss.route.name} — serving at ${ss.schools.join(", ")} — needs ${ss.need} server${ss.need > 1 ? "s" : ""}, has ${ss.have}`,
+      fixKey: `${cv.day.key}|${ss.route.id}`,
+      dayKey: cv.day.key,
+      routeId: ss.route.id,
     }));
   });
   entries.forEach(en => {
@@ -281,6 +288,41 @@ export default function ScheduleBoard({ onNavigate }) {
   function driverServeSchools(routeId) {
     const r = routes.find(x => x.id === routeId);
     return (r?.stops || []).filter(s => ["driver_serves", "driver_and_server"].includes(s.serveType)).map(s => s.schoolName);
+  }
+
+  // Best-guess people to fill a role on a route that day, ranked by how well
+  // their existing text chips match the route's schools. Powers click-to-fix.
+  function candidatesFor(dayKey, routeId, role) {
+    const r = routes.find(x => x.id === routeId);
+    const schoolWords = (r?.stops || []).flatMap(s => (s.schoolName || "").toLowerCase().split(/[^a-z]+/)).filter(w => w.length > 3);
+    return entries.map(en => {
+      const emp = empById[en.employee_id];
+      const day = { ...EMPTY_DAY, ...(en.days?.[dayKey] || {}) };
+      if (!emp || ["off", "pto", "callout"].includes(day.status)) return null;
+      if ((day.assignments || []).some(a => a.type === "route" && a.route_id === routeId)) return null;
+      let score = (emp.roles || []).includes(role) ? 2 : 0;
+      let bestChip = -1, bestChipScore = 0;
+      (day.assignments || []).forEach((a, idx) => {
+        if (a.type !== "text") return;
+        const t = a.text.toLowerCase();
+        let s = 0;
+        schoolWords.forEach(w => { if (t.includes(w)) s += 1; });
+        if (role === "server" && /serv/.test(t)) s += 1;
+        if (s > bestChipScore) { bestChipScore = s; bestChip = idx; }
+      });
+      score += bestChipScore * 2;
+      return { en, emp, day, score, bestChip: bestChipScore > 0 ? bestChip : -1 };
+    }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 5);
+  }
+
+  // Link the candidate to the route: replace their matching text chip if one
+  // exists (so the duty isn't listed twice), otherwise append the link.
+  function applyFix(cand, dayKey, routeId, role) {
+    const r = routes.find(x => x.id === routeId);
+    const link = { type: "route", route_id: routeId, label: r?.name || "route", role };
+    const assignments = (cand.day.assignments || []).map((a, idx) => idx === cand.bestChip ? link : a);
+    if (cand.bestChip === -1) assignments.push(link);
+    updateDay(cand.en.id, dayKey, { assignments });
   }
 
   const selEntry = selected ? entries.find(en => en.id === selected.entryId) : null;
@@ -472,11 +514,33 @@ export default function ScheduleBoard({ onNavigate }) {
               {issuesOpen && (
                 <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 3 }}>
                   {issues.map((iss, i) => (
-                    <div key={i} onClick={() => iss.target && setSelected(iss.target)}
-                      style={{ fontSize: 12, color: "#78350f", padding: "3px 8px", borderRadius: 5, cursor: iss.target ? "pointer" : "default", background: "#fef3c7" }}
-                      onMouseEnter={e => { if (iss.target) e.currentTarget.style.background = "#fde68a"; }}
-                      onMouseLeave={e => e.currentTarget.style.background = "#fef3c7"}>
-                      {iss.text}{iss.target ? " →" : ""}
+                    <div key={i}>
+                      <div onClick={() => { if (iss.fixKey) setFixOpen(fixOpen === iss.fixKey ? null : iss.fixKey); else if (iss.target) setSelected(iss.target); }}
+                        style={{ fontSize: 12, color: "#78350f", padding: "3px 8px", borderRadius: 5, cursor: (iss.target || iss.fixKey) ? "pointer" : "default", background: "#fef3c7" }}
+                        onMouseEnter={e => { if (iss.target || iss.fixKey) e.currentTarget.style.background = "#fde68a"; }}
+                        onMouseLeave={e => e.currentTarget.style.background = "#fef3c7"}>
+                        {iss.text}{iss.fixKey ? <b>{fixOpen === iss.fixKey ? "  ▲" : "  — click to fix ▾"}</b> : iss.target ? " →" : ""}
+                      </div>
+                      {iss.fixKey && fixOpen === iss.fixKey && (
+                        <div style={{ margin: "4px 0 8px 14px", padding: "8px 12px", background: C.surface, border: `1px solid ${C.amber}70`, borderRadius: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: C.navy, marginBottom: 6 }}>Who's serving this route that day? Best guesses first — click Link:</div>
+                          {candidatesFor(iss.dayKey, iss.routeId, "server").map(cand => (
+                            <div key={cand.en.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0", fontSize: 12 }}>
+                              <b style={{ color: C.navy, minWidth: 90 }}>{cand.emp.name}</b>
+                              <span style={{ color: C.muted, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {cand.bestChip >= 0
+                                  ? `matches their “${cand.day.assignments[cand.bestChip].text}” chip`
+                                  : (cand.day.assignments || []).map(a => a.type === "text" ? a.text : a.label).join(", ") || "no assignments yet"}
+                              </span>
+                              <button onClick={() => applyFix(cand, iss.dayKey, iss.routeId, "server")}
+                                style={{ background: C.amber + "20", color: "#92400e", border: `1px solid ${C.amber}`, borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Link 🍽</button>
+                            </div>
+                          ))}
+                          {candidatesFor(iss.dayKey, iss.routeId, "server").length === 0 && (
+                            <div style={{ fontSize: 11, color: C.muted }}>Nobody is available that day — everyone is OFF/PTO/called out or already on this route.</div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -495,7 +559,7 @@ export default function ScheduleBoard({ onNavigate }) {
                     {cv.uncovered.length === 0
                       ? <div style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ covered</div>
                       : <div title={cv.uncovered.map(r => r.name).join(", ")} style={{ fontSize: 11, color: C.red, fontWeight: 700, cursor: "help" }}>{cv.uncovered.length} route{cv.uncovered.length > 1 ? "s" : ""} open</div>}
-                    {cv.serverShort.length > 0 && <div title={cv.serverShort.map(s => `${s.route.name}: needs ${s.need} server(s), has ${s.have}`).join("\n")} style={{ fontSize: 10, color: C.amber, cursor: "help", fontWeight: 700 }}>{cv.serverShort.length} short on servers</div>}
+                    {cv.serverShort.length > 0 && <div title={cv.serverShort.map(s => `${s.route.name} (${s.schools.join(", ")}): needs ${s.need} server(s), has ${s.have}`).join("\n")} style={{ fontSize: 10, color: C.amber, cursor: "help", fontWeight: 700 }}>{cv.serverShort.length} short on servers</div>}
                     {cv.doubles.length > 0 && <div title={cv.doubles.map(x => `${x.route?.name}: ${x.names.join(" + ")}`).join("\n")} style={{ fontSize: 10, color: C.muted, cursor: "help" }}>{cv.doubles.length} dual-driver</div>}
                   </div>
                 ))}
