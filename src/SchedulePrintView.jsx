@@ -41,8 +41,14 @@ const CSS = `
 }
 `;
 
-export default function SchedulePrintView({ week, entries, employees, onClose }) {
+export default function SchedulePrintView({ week, entries, employees, routes = [], onClose }) {
   const empById = Object.fromEntries(employees.map(e => [e.id, e]));
+  // routes where the driver also serves at one or more stops
+  const driverServes = {};
+  routes.forEach(r => {
+    const schools = (r.stops || []).filter(s => ["driver_serves", "driver_and_server"].includes(s.serveType)).map(s => s.schoolName);
+    if (schools.length) driverServes[r.id] = schools;
+  });
   const rows = entries.map(en => ({ en, emp: empById[en.employee_id] })).filter(r => r.emp);
   const totals = rows.map(r => weekHours(r.en.days));
   const rosterTotal = totals.reduce((a, b) => a + b, 0);
@@ -96,7 +102,9 @@ export default function SchedulePrintView({ week, entries, employees, onClose })
                           <div className="spv-time">{day.in || "—"} – {day.out || "—"}</div>
                           {(day.assignments || []).map((a, j) => (
                             <div key={j} className={`spv-asg${a.type === "text" ? " txt" : a.role === "server" ? " srv" : ""}`}>
-                              {a.type === "route" ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}` : a.text}
+                              {a.type === "route"
+                                ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}${a.role !== "server" && driverServes[a.route_id] ? " +🍽" : ""}`
+                                : a.text}
                             </div>
                           ))}
                           {day.note && <div className="spv-note">• {day.note}</div>}
@@ -117,6 +125,7 @@ export default function SchedulePrintView({ week, entries, employees, onClose })
             <div>Total scheduled: <b>{fmtHours(rosterTotal)} hrs</b></div>
             <div>Overtime: <b style={{ color: rosterOT > 0 ? "#b45309" : "#0f172a" }}>{fmtHours(rosterOT)} hrs</b></div>
             <div>People: <b>{rows.length}</b></div>
+            <div style={{ marginLeft: "auto" }}>🚚 drives · 🍽 serves · <b>+🍽 driver also serves at school</b></div>
           </div>
         </div>
       </div>

@@ -276,6 +276,13 @@ export default function ScheduleBoard({ onNavigate }) {
     return roles.includes("server") && !roles.includes("driver") ? "server" : "driver";
   }
 
+  // Schools on a route where the DRIVER also serves (from Route Builder's
+  // per-stop serve types) — surfaced as a +🍽 marker on driver chips.
+  function driverServeSchools(routeId) {
+    const r = routes.find(x => x.id === routeId);
+    return (r?.stops || []).filter(s => ["driver_serves", "driver_and_server"].includes(s.serveType)).map(s => s.schoolName);
+  }
+
   const selEntry = selected ? entries.find(en => en.id === selected.entryId) : null;
   const selDay = selEntry ? { ...EMPTY_DAY, ...(selEntry.days?.[selected.dayKey] || {}) } : null;
   const selEmp = selEntry ? empById[selEntry.employee_id] : null;
@@ -285,7 +292,7 @@ export default function ScheduleBoard({ onNavigate }) {
   if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300, color: C.muted, fontSize: 15 }}>Loading schedule...</div>;
 
   if (printing && week) {
-    return <SchedulePrintView week={week} entries={entries} employees={employees} onClose={() => setPrinting(false)} />;
+    return <SchedulePrintView week={week} entries={entries} employees={employees} routes={routes} onClose={() => setPrinting(false)} />;
   }
 
   const missingCount = employees.filter(e => e.active && !entries.some(en => en.employee_id === e.id)).length;
@@ -335,6 +342,9 @@ export default function ScheduleBoard({ onNavigate }) {
                       title={a.role === "server" ? "Serving on this route — click to switch to Driving" : "Driving this route — click to switch to Serving"}
                       style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>{a.role === "server" ? "🍽" : "🚚"}</button>
                     {a.label || "route"}{a.role === "server" ? " (serve)" : ""}
+                    {a.role !== "server" && driverServeSchools(a.route_id).length > 0 && (
+                      <span title={`Driver also serves at: ${driverServeSchools(a.route_id).join(", ")}`} style={{ fontSize: 10, cursor: "help" }}>+🍽</span>
+                    )}
                   </>
                 ) : a.text}
                 {a.type === "text" && (
@@ -545,11 +555,15 @@ export default function ScheduleBoard({ onNavigate }) {
                                     {day.in || "—"}–{day.out || "—"}
                                     {warn && <span title={warn} style={{ color: C.red, marginLeft: 3, cursor: "help" }}>⚠</span>}
                                   </div>
-                                  {(day.assignments || []).map((a, i) => (
-                                    <div key={i} style={{ fontSize: 9, color: a.type === "route" ? (a.role === "server" ? C.amber : C.teal) : C.muted, fontWeight: a.type === "route" ? 700 : 500, lineHeight: 1.4 }}>
-                                      {a.type === "route" ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}` : a.text}
-                                    </div>
-                                  ))}
+                                  {(day.assignments || []).map((a, i) => {
+                                    const dss = a.type === "route" && a.role !== "server" ? driverServeSchools(a.route_id) : [];
+                                    return (
+                                      <div key={i} title={dss.length ? `Driver also serves at: ${dss.join(", ")}` : undefined}
+                                        style={{ fontSize: 9, color: a.type === "route" ? (a.role === "server" ? C.amber : C.teal) : C.muted, fontWeight: a.type === "route" ? 700 : 500, lineHeight: 1.4, cursor: dss.length ? "help" : undefined }}>
+                                        {a.type === "route" ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}${dss.length ? " +🍽" : ""}` : a.text}
+                                      </div>
+                                    );
+                                  })}
                                   {day.actual_in && <div style={{ fontSize: 8, color: C.blue }}>act: {day.actual_in}–{day.actual_out || "?"}</div>}
                                   {day.note && <div style={{ fontSize: 8, color: C.amber }}>• {day.note}</div>}
                                 </>
