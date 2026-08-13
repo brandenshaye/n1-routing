@@ -7,20 +7,22 @@ const CSS = `
 .spv-wrap { color: #0f172a; overflow-wrap: break-word; }
 .spv-wrap, .spv-wrap * { box-sizing: border-box; }
 .spv-sheet { background: #fff; }
-.spv-title { font-size: 18px; font-weight: 800; }
-.spv-sub { font-size: 10px; color: #475569; margin-bottom: 2px; }
-.spv-banner { font-size: 11px; font-weight: 700; color: #b45309; border: 1px solid #f59e0b; background: #fffbeb; border-radius: 6px; padding: 4px 10px; display: inline-block; margin: 4px 0 8px; }
-.spv-table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
-.spv-table th { background: #0f2744; color: #e2e8f0; text-align: left; font-size: 8.5px; text-transform: uppercase; letter-spacing: .03em; padding: 4px 7px; }
-.spv-table td { border-bottom: 1px solid #e2e8f0; padding: 4px 7px; vertical-align: top; }
+.spv-title { font-size: 28px; font-weight: 900; letter-spacing: -0.01em; }
+.spv-sub { font-size: 13px; color: #475569; margin-bottom: 2px; font-weight: 600; }
+.spv-banner { font-size: 14px; font-weight: 800; color: #b45309; border: 2px solid #f59e0b; background: #fffbeb; border-radius: 6px; padding: 6px 14px; display: inline-block; margin: 6px 0 10px; }
+.spv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.spv-table th { background: #0f2744; color: #ffffff; text-align: left; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 8px 9px; }
+.spv-table th .dt { font-size: 10px; font-weight: 600; color: #cbd5e1; display: block; }
+.spv-table td { border-bottom: 1px solid #e2e8f0; padding: 7px 9px; vertical-align: top; }
+.spv-table th + th, .spv-table td + td { border-left: 1.5px solid #cbd5e1; }
 .spv-table tr { break-inside: avoid; page-break-inside: avoid; }
-.spv-name { font-weight: 800; font-size: 10px; white-space: nowrap; }
-.spv-title-sm { font-size: 8px; color: #7c3aed; font-weight: 700; }
-.spv-time { font-weight: 700; white-space: nowrap; font-size: 10px; }
-.spv-status { font-weight: 800; }
-.spv-asg { color: #0d9488; font-weight: 600; line-height: 1.35; }
+.spv-name { font-weight: 800; font-size: 13px; white-space: nowrap; }
+.spv-title-sm { font-size: 10px; color: #7c3aed; font-weight: 700; }
+.spv-time { font-weight: 800; white-space: nowrap; font-size: 13px; }
+.spv-status { font-weight: 800; font-size: 13px; }
+.spv-asg { color: #0d9488; font-weight: 700; line-height: 1.4; font-size: 12px; }
 .spv-asg.srv { color: #b45309; }
-.spv-asg.txt { color: #475569; font-weight: 500; }
+.spv-asg.txt { color: #475569; font-weight: 600; }
 .spv-asg .sch { color: #475569; font-weight: 500; }
 
 @media screen {
@@ -67,7 +69,12 @@ export default function SchedulePrintView({ week, entries, employees, routes = [
             <thead>
               <tr>
                 <th style={{ width: "15%" }}>Employee</th>
-                {WEEKDAYS.map((d, i) => <th key={d.key} style={{ width: "17%" }}>{d.label} {dayDate(week.week_start, i)}</th>)}
+                {WEEKDAYS.map((d, i) => (
+                  <th key={d.key} style={{ width: "17%" }}>
+                    {d.label}
+                    <span className="dt">{dayDate(week.week_start, i)}</span>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
