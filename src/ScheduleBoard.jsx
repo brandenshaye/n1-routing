@@ -339,7 +339,7 @@ export default function ScheduleBoard({ onNavigate }) {
   if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300, color: C.muted, fontSize: 15 }}>Loading schedule...</div>;
 
   if (printing && week) {
-    return <SchedulePrintView week={week} entries={entries} employees={employees} onClose={() => setPrinting(false)} />;
+    return <SchedulePrintView week={week} entries={entries} employees={employees} routes={routes} onClose={() => setPrinting(false)} />;
   }
 
   const missingCount = employees.filter(e => e.active && !entries.some(en => en.employee_id === e.id)).length;

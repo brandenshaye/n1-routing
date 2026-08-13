@@ -1,8 +1,8 @@
 import { KITCHEN } from "./config.jsx";
 import { WEEKDAYS, statusInfo, EMPTY_DAY, fmtWeekLabel, dayDate } from "./scheduleShared.jsx";
 
-// Deliberately minimal per leadership: the distributed schedule is just the
-// roster and each person's times per day — no assignments, no hour totals.
+// Distributed schedule per leadership: roster, times, and route assignments
+// per day. No day notes, no hour totals, no OT.
 const CSS = `
 .spv-wrap { color: #0f172a; overflow-wrap: break-word; }
 .spv-wrap, .spv-wrap * { box-sizing: border-box; }
@@ -10,15 +10,18 @@ const CSS = `
 .spv-title { font-size: 18px; font-weight: 800; }
 .spv-sub { font-size: 10px; color: #475569; margin-bottom: 2px; }
 .spv-banner { font-size: 11px; font-weight: 700; color: #b45309; border: 1px solid #f59e0b; background: #fffbeb; border-radius: 6px; padding: 4px 10px; display: inline-block; margin: 4px 0 8px; }
-.spv-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.spv-table th { background: #0f2744; color: #e2e8f0; text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .03em; padding: 5px 8px; }
-.spv-table td { border-bottom: 1px solid #e2e8f0; padding: 5px 8px; vertical-align: top; }
+.spv-table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+.spv-table th { background: #0f2744; color: #e2e8f0; text-align: left; font-size: 8.5px; text-transform: uppercase; letter-spacing: .03em; padding: 4px 7px; }
+.spv-table td { border-bottom: 1px solid #e2e8f0; padding: 4px 7px; vertical-align: top; }
 .spv-table tr { break-inside: avoid; page-break-inside: avoid; }
-.spv-name { font-weight: 800; font-size: 11px; white-space: nowrap; }
+.spv-name { font-weight: 800; font-size: 10px; white-space: nowrap; }
 .spv-title-sm { font-size: 8px; color: #7c3aed; font-weight: 700; }
-.spv-time { font-weight: 700; white-space: nowrap; }
+.spv-time { font-weight: 700; white-space: nowrap; font-size: 10px; }
 .spv-status { font-weight: 800; }
-.spv-note { color: #b45309; font-size: 9px; }
+.spv-asg { color: #0d9488; font-weight: 600; line-height: 1.35; }
+.spv-asg.srv { color: #b45309; }
+.spv-asg.txt { color: #475569; font-weight: 500; }
+.spv-asg .sch { color: #475569; font-weight: 500; }
 
 @media screen {
   .spv-scr-bg { background: #64748b; min-height: 100vh; padding: 24px 0 60px; }
@@ -36,8 +39,9 @@ const CSS = `
 }
 `;
 
-export default function SchedulePrintView({ week, entries, employees, onClose }) {
+export default function SchedulePrintView({ week, entries, employees, routes = [], onClose }) {
   const empById = Object.fromEntries(employees.map(e => [e.id, e]));
+  const routeById = Object.fromEntries(routes.map(r => [r.id, r]));
   const rows = entries.map(en => ({ en, emp: empById[en.employee_id] })).filter(r => r.emp);
   const btn = { background: "#ffffff20", color: "#fff", border: "1px solid #ffffff40", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" };
 
@@ -82,7 +86,17 @@ export default function SchedulePrintView({ week, entries, employees, onClose })
                     return (
                       <td key={d.key}>
                         <div className="spv-time">{day.in || "—"} – {day.out || "—"}</div>
-                        {day.note && <div className="spv-note">• {day.note}</div>}
+                        {(day.assignments || []).map((a, j) => {
+                          if (a.type !== "route") return <div key={j} className="spv-asg txt">{a.text}</div>;
+                          const rt = routeById[a.route_id];
+                          const schools = (rt?.stops || []).map(s => s.schoolName).join(", ");
+                          return (
+                            <div key={j} className={`spv-asg${a.role === "server" ? " srv" : ""}`}>
+                              {`${a.role === "server" ? "🍽 " : ""}${a.label || "route"}`}
+                              {schools && <span className="sch"> — {schools}</span>}
+                            </div>
+                          );
+                        })}
                       </td>
                     );
                   })}
