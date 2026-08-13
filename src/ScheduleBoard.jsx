@@ -258,11 +258,9 @@ export default function ScheduleBoard({ onNavigate }) {
   const issueCounts = issues.reduce((a, i) => { a[i.kind] = (a[i.kind] || 0) + 1; return a; }, {});
   const ISSUE_LABELS = { coverage: "uncovered routes", servers: "server shortfalls", empty: "empty days", noassign: "missing assignments", notimes: "missing times", avail: "availability conflicts" };
 
-  function printWithCheck() {
-    if (issues.length > 0) {
-      const summary = Object.entries(issueCounts).map(([k, n]) => `  • ${n} ${ISSUE_LABELS[k]}`).join("\n");
-      if (!confirm(`⚠ This schedule still has ${issues.length} open item${issues.length > 1 ? "s" : ""}:\n\n${summary}\n\nPrint anyway?`)) return;
-    }
+  // Print is intentionally ungated: the banner still shows open items on the
+  // editing screen, but it never stands between leadership and the PDF.
+  function openPrint() {
     flushSaves();
     setPrinting(true);
   }
@@ -341,7 +339,7 @@ export default function ScheduleBoard({ onNavigate }) {
   if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300, color: C.muted, fontSize: 15 }}>Loading schedule...</div>;
 
   if (printing && week) {
-    return <SchedulePrintView week={week} entries={entries} employees={employees} routes={routes} onClose={() => setPrinting(false)} />;
+    return <SchedulePrintView week={week} entries={entries} employees={employees} onClose={() => setPrinting(false)} />;
   }
 
   const missingCount = employees.filter(e => e.active && !entries.some(en => en.employee_id === e.id)).length;
@@ -463,7 +461,7 @@ export default function ScheduleBoard({ onNavigate }) {
             {weeks.length === 0 && <option value="">No weeks yet</option>}
           </select>
           <button onClick={() => { setNewWeekOpen(true); setNewWeekDate(nextMonday(weeks[0]?.week_start)); }} style={{ background: C.teal, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ New Week</button>
-          {week && <button onClick={printWithCheck} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.navy }}>🖨 Print / PDF</button>}
+          {week && <button onClick={openPrint} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.navy }}>🖨 Print / PDF</button>}
           {week && <button onClick={removeWeek} style={{ background: "#fef2f2", border: `1px solid ${C.red}40`, borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.red }}>Delete Week</button>}
         </div>
       </div>
