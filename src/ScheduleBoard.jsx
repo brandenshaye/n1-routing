@@ -628,9 +628,14 @@ export default function ScheduleBoard({ onNavigate }) {
                                   </div>
                                   {(day.assignments || []).map((a, i) => {
                                     const dss = a.type === "route" && a.role !== "server" ? driverServeSchools(a.route_id) : [];
+                                    const rt = a.type === "route" ? routes.find(x => x.id === a.route_id) : null;
+                                    const schools = rt ? (rt.stops || []).map(s => s.schoolName).join(", ") : "";
+                                    const tip = a.type === "route"
+                                      ? `${a.label || "route"}: ${schools || "no stops"}${dss.length ? ` — driver serves at ${dss.join(", ")}` : ""}`
+                                      : undefined;
                                     return (
-                                      <div key={i} title={dss.length ? `Driver also serves at: ${dss.join(", ")}` : undefined}
-                                        style={{ fontSize: 9, color: a.type === "route" ? (a.role === "server" ? C.amber : C.teal) : C.muted, fontWeight: a.type === "route" ? 700 : 500, lineHeight: 1.4, cursor: dss.length ? "help" : undefined }}>
+                                      <div key={i} title={tip}
+                                        style={{ fontSize: 9, color: a.type === "route" ? (a.role === "server" ? C.amber : C.teal) : C.muted, fontWeight: a.type === "route" ? 700 : 500, lineHeight: 1.4, cursor: tip ? "help" : undefined }}>
                                         {a.type === "route" ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}${dss.length ? " +🍽" : ""}` : a.text}
                                       </div>
                                     );

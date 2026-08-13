@@ -100,13 +100,17 @@ export default function SchedulePrintView({ week, entries, employees, routes = [
                       return (
                         <td key={d.key}>
                           <div className="spv-time">{day.in || "—"} – {day.out || "—"}</div>
-                          {(day.assignments || []).map((a, j) => (
-                            <div key={j} className={`spv-asg${a.type === "text" ? " txt" : a.role === "server" ? " srv" : ""}`}>
-                              {a.type === "route"
-                                ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}${a.role !== "server" && driverServes[a.route_id] ? " +🍽" : ""}`
-                                : a.text}
-                            </div>
-                          ))}
+                          {(day.assignments || []).map((a, j) => {
+                            if (a.type !== "route") return <div key={j} className="spv-asg txt">{a.text}</div>;
+                            const rt = routes.find(x => x.id === a.route_id);
+                            const schools = (rt?.stops || []).map(s => s.schoolName).join(", ");
+                            return (
+                              <div key={j} className={`spv-asg${a.role === "server" ? " srv" : ""}`}>
+                                {`${a.role === "server" ? "🍽 " : ""}${a.label || "route"}${a.role !== "server" && driverServes[a.route_id] ? " +🍽" : ""}`}
+                                {schools && <span style={{ color: "#475569", fontWeight: 500 }}> — {schools}</span>}
+                              </div>
+                            );
+                          })}
                           {day.note && <div className="spv-note">• {day.note}</div>}
                         </td>
                       );
