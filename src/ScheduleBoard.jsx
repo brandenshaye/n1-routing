@@ -114,10 +114,9 @@ export default function ScheduleBoard({ onNavigate }) {
       } else if (source === "routes") {
         rows = activeEmps.map((emp, i) => {
           const norm = s => (s || "").trim().toLowerCase();
-          const mine = routes.filter(r =>
-            norm(r.driver_name) === norm(emp.name) ||
-            (r.server_names || "").split(",").some(n => norm(n) === norm(emp.name))
-          );
+          const drives = routes.filter(r => norm(r.driver_name) === norm(emp.name));
+          const serves = routes.filter(r => (r.server_names || "").split(",").some(n => norm(n) === norm(emp.name)));
+          const mine = [...drives, ...serves];
           const days = defaultDays();
           if (mine.length > 0) {
             const ins = mine.map(r => parseTimeStr(r.departure_time)).filter(v => v !== null);
@@ -125,8 +124,11 @@ export default function ScheduleBoard({ onNavigate }) {
             const toStr = mins => { let h = Math.floor(mins / 60); const m = String(mins % 60).padStart(2, "0"); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}:${m} ${ap}`; };
             const inS = ins.length ? toStr(Math.min(...ins)) : "";
             const outS = outs.length ? toStr(Math.max(...outs)) : "";
-            const assignments = mine.map(r => ({ type: "route", route_id: r.id, label: r.name }));
-            WEEKDAYS.forEach(d => { days[d.key] = { ...EMPTY_DAY, in: inS, out: outS, assignments: [...assignments] }; });
+            const assignments = [
+              ...drives.map(r => ({ type: "route", route_id: r.id, label: r.name, role: "driver" })),
+              ...serves.map(r => ({ type: "route", route_id: r.id, label: r.name, role: "server" })),
+            ];
+            WEEKDAYS.forEach(d => { days[d.key] = { ...EMPTY_DAY, in: inS, out: outS, assignments: assignments.map(a => ({ ...a })) }; });
           }
           return { week_id: wk.id, employee_id: emp.id, days, sort_order: i };
         });
@@ -173,23 +175,34 @@ export default function ScheduleBoard({ onNavigate }) {
 
   // ── Derived: warnings, coverage, totals ───────────────────
   const activeRoutes = routes.filter(r => (r.stops?.length || 0) > 0);
+  // How many dedicated servers each route needs (from its stops' serve types).
+  const routeServerNeed = {};
+  activeRoutes.forEach(r => {
+    routeServerNeed[r.id] = (r.stops || []).reduce((a, s) =>
+      a + (["dedicated_server", "driver_and_server"].includes(s.serveType) ? (parseInt(s.serverCount) || 1) : 0), 0);
+  });
   const coverage = WEEKDAYS.map(d => {
-    const assignedRouteIds = new Set();
-    const routeUsers = {};
+    const driversOn = {}; // route_id -> [names] with role driver (or untagged legacy links)
+    const serversOn = {}; // route_id -> [names] with role server
     entries.forEach(en => {
       const day = en.days?.[d.key];
       if (!day || day.status === "off" || day.status === "pto" || day.status === "callout") return;
       (day.assignments || []).forEach(a => {
         if (a.type === "route" && a.route_id) {
-          assignedRouteIds.add(a.route_id);
-          routeUsers[a.route_id] = (routeUsers[a.route_id] || []).concat(empById[en.employee_id]?.name || "?");
+          const bucket = a.role === "server" ? serversOn : driversOn;
+          bucket[a.route_id] = (bucket[a.route_id] || []).concat(empById[en.employee_id]?.name || "?");
         }
       });
     });
-    const uncovered = activeRoutes.filter(r => !assignedRouteIds.has(r.id));
-    const doubles = Object.entries(routeUsers).filter(([, names]) => names.length > 1)
+    // A route is covered only when a DRIVER is on it; servers don't drive it.
+    const uncovered = activeRoutes.filter(r => !driversOn[r.id]);
+    const doubles = Object.entries(driversOn).filter(([, names]) => names.length > 1)
       .map(([rid, names]) => ({ route: routes.find(r => r.id === rid), names }));
-    return { day: d, uncovered, doubles };
+    // Only warn about missing servers on routes that ARE being driven that day
+    // (fully uncovered routes are already reported above).
+    const serverShort = activeRoutes.filter(r => driversOn[r.id] && routeServerNeed[r.id] > (serversOn[r.id]?.length || 0))
+      .map(r => ({ route: r, need: routeServerNeed[r.id], have: serversOn[r.id]?.length || 0 }));
+    return { day: d, uncovered, doubles, serverShort };
   });
 
   const totals = entries.map(en => {
@@ -205,8 +218,12 @@ export default function ScheduleBoard({ onNavigate }) {
   coverage.forEach(cv => {
     if (cv.uncovered.length > 0) issues.push({
       kind: "coverage",
-      text: `${cv.day.label}: ${cv.uncovered.length} route${cv.uncovered.length > 1 ? "s" : ""} with nobody assigned — ${cv.uncovered.slice(0, 4).map(r => r.name).join(", ")}${cv.uncovered.length > 4 ? "…" : ""}`,
+      text: `${cv.day.label}: ${cv.uncovered.length} route${cv.uncovered.length > 1 ? "s" : ""} with no driver — ${cv.uncovered.slice(0, 4).map(r => r.name).join(", ")}${cv.uncovered.length > 4 ? "…" : ""}`,
     });
+    cv.serverShort.forEach(ss => issues.push({
+      kind: "servers",
+      text: `${cv.day.label}: ${ss.route.name} needs ${ss.need} server${ss.need > 1 ? "s" : ""}, has ${ss.have}`,
+    }));
   });
   entries.forEach(en => {
     const emp = empById[en.employee_id];
@@ -225,7 +242,7 @@ export default function ScheduleBoard({ onNavigate }) {
     });
   });
   const issueCounts = issues.reduce((a, i) => { a[i.kind] = (a[i.kind] || 0) + 1; return a; }, {});
-  const ISSUE_LABELS = { coverage: "uncovered routes", empty: "empty days", noassign: "missing assignments", notimes: "missing times", avail: "availability conflicts" };
+  const ISSUE_LABELS = { coverage: "uncovered routes", servers: "server shortfalls", empty: "empty days", noassign: "missing assignments", notimes: "missing times", avail: "availability conflicts" };
 
   function printWithCheck() {
     if (issues.length > 0) {
@@ -250,6 +267,13 @@ export default function ScheduleBoard({ onNavigate }) {
       if ((r.driver_name || "").toLowerCase() === (empName || "").toLowerCase()) score += 2;
       return { r, score };
     }).sort((a, b) => b.score - a.score);
+  }
+
+  // New route links default to the person's role: server-only people serve,
+  // everyone else drives. The chip's 🚚/🍽 icon flips it either way.
+  function defaultRole(emp) {
+    const roles = emp?.roles || [];
+    return roles.includes("server") && !roles.includes("driver") ? "server" : "driver";
   }
 
   const selEntry = selected ? entries.find(en => en.id === selected.entryId) : null;
@@ -304,8 +328,15 @@ export default function ScheduleBoard({ onNavigate }) {
           <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Assignments</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             {(selDay.assignments || []).map((a, i) => (
-              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: a.type === "route" ? C.teal + "15" : C.light, border: `1px solid ${a.type === "route" ? C.teal + "50" : C.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 600, color: a.type === "route" ? C.teal : C.navy }}>
-                {a.type === "route" ? `🚚 ${a.label || "route"}` : a.text}
+              <span key={i} style={(() => { const rc = a.type !== "route" ? null : (a.role === "server" ? C.amber : C.teal); return { display: "inline-flex", alignItems: "center", gap: 5, background: rc ? rc + "15" : C.light, border: `1px solid ${rc ? rc + "50" : C.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 11, fontWeight: 600, color: rc || C.navy }; })()}>
+                {a.type === "route" ? (
+                  <>
+                    <button onClick={() => { const assignments = selDay.assignments.map((x, j) => j === i ? { ...x, role: x.role === "server" ? "driver" : "server" } : x); updateDay(selEntry.id, selected.dayKey, { assignments }); }}
+                      title={a.role === "server" ? "Serving on this route — click to switch to Driving" : "Driving this route — click to switch to Serving"}
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>{a.role === "server" ? "🍽" : "🚚"}</button>
+                    {a.label || "route"}{a.role === "server" ? " (serve)" : ""}
+                  </>
+                ) : a.text}
                 {a.type === "text" && (
                   <button onClick={() => setConvertIdx(convertIdx === i ? null : i)} title="Convert to a linked route (counts toward coverage)"
                     style={{ background: convertIdx === i ? C.teal : "none", color: convertIdx === i ? "#fff" : C.teal, border: `1px solid ${C.teal}60`, borderRadius: 4, cursor: "pointer", fontWeight: 800, fontSize: 10, padding: "0 4px" }}>⇄</button>
@@ -322,7 +353,7 @@ export default function ScheduleBoard({ onNavigate }) {
               <select value="" onChange={e => {
                 const r = routes.find(x => x.id === e.target.value);
                 if (!r) return;
-                const assignments = selDay.assignments.map((a, j) => j === convertIdx ? { type: "route", route_id: r.id, label: r.name } : a);
+                const assignments = selDay.assignments.map((a, j) => j === convertIdx ? { type: "route", route_id: r.id, label: r.name, role: defaultRole(selEmp) } : a);
                 updateDay(selEntry.id, selected.dayKey, { assignments });
                 setConvertIdx(null);
               }} style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 10px", fontSize: 12, outline: "none", background: "#fff", width: 340, maxWidth: "100%" }}>
@@ -339,7 +370,7 @@ export default function ScheduleBoard({ onNavigate }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <select value="" onChange={e => {
               const r = routes.find(x => x.id === e.target.value);
-              if (r) updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "route", route_id: r.id, label: r.name }] });
+              if (r) updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "route", route_id: r.id, label: r.name, role: defaultRole(selEmp) }] });
             }} style={{ ...inp, background: "#fff", width: 200 }}>
               <option value="">+ Link a route...</option>
               {routes.map(r => <option key={r.id} value={r.id}>{r.name}{r.driver_name ? ` (${r.driver_name})` : ""}</option>)}
@@ -454,11 +485,12 @@ export default function ScheduleBoard({ onNavigate }) {
                     {cv.uncovered.length === 0
                       ? <div style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✓ covered</div>
                       : <div title={cv.uncovered.map(r => r.name).join(", ")} style={{ fontSize: 11, color: C.red, fontWeight: 700, cursor: "help" }}>{cv.uncovered.length} route{cv.uncovered.length > 1 ? "s" : ""} open</div>}
-                    {cv.doubles.length > 0 && <div title={cv.doubles.map(x => `${x.route?.name}: ${x.names.join(" + ")}`).join("\n")} style={{ fontSize: 10, color: C.amber, cursor: "help" }}>{cv.doubles.length} shared</div>}
+                    {cv.serverShort.length > 0 && <div title={cv.serverShort.map(s => `${s.route.name}: needs ${s.need} server(s), has ${s.have}`).join("\n")} style={{ fontSize: 10, color: C.amber, cursor: "help", fontWeight: 700 }}>{cv.serverShort.length} short on servers</div>}
+                    {cv.doubles.length > 0 && <div title={cv.doubles.map(x => `${x.route?.name}: ${x.names.join(" + ")}`).join("\n")} style={{ fontSize: 10, color: C.muted, cursor: "help" }}>{cv.doubles.length} dual-driver</div>}
                   </div>
                 ))}
               </div>
-              <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>Counts routes linked via the route picker. Free-text assignments aren't counted.</div>
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>Coverage = a 🚚 driver link on the route. 🍽 server links count toward each route's server needs. Free-text assignments aren't counted.</div>
             </div>
             {/* Roster totals + OT */}
             <div style={{ flex: "1 1 220px", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px" }}>
@@ -514,8 +546,8 @@ export default function ScheduleBoard({ onNavigate }) {
                                     {warn && <span title={warn} style={{ color: C.red, marginLeft: 3, cursor: "help" }}>⚠</span>}
                                   </div>
                                   {(day.assignments || []).map((a, i) => (
-                                    <div key={i} style={{ fontSize: 9, color: a.type === "route" ? C.teal : C.muted, fontWeight: a.type === "route" ? 700 : 500, lineHeight: 1.4 }}>
-                                      {a.type === "route" ? (a.label || "route") : a.text}
+                                    <div key={i} style={{ fontSize: 9, color: a.type === "route" ? (a.role === "server" ? C.amber : C.teal) : C.muted, fontWeight: a.type === "route" ? 700 : 500, lineHeight: 1.4 }}>
+                                      {a.type === "route" ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}` : a.text}
                                     </div>
                                   ))}
                                   {day.actual_in && <div style={{ fontSize: 8, color: C.blue }}>act: {day.actual_in}–{day.actual_out || "?"}</div>}

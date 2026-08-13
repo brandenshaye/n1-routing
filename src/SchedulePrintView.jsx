@@ -16,6 +16,7 @@ const CSS = `
 .spv-title-sm { font-size: 7px; color: #7c3aed; font-weight: 700; }
 .spv-time { font-weight: 700; white-space: nowrap; }
 .spv-asg { color: #0d9488; font-weight: 600; line-height: 1.35; }
+.spv-asg.srv { color: #b45309; }
 .spv-asg.txt { color: #475569; font-weight: 500; }
 .spv-status { font-weight: 800; }
 .spv-tot { text-align: right; font-weight: 800; white-space: nowrap; }
@@ -94,7 +95,9 @@ export default function SchedulePrintView({ week, entries, employees, onClose })
                         <td key={d.key}>
                           <div className="spv-time">{day.in || "—"} – {day.out || "—"}</div>
                           {(day.assignments || []).map((a, j) => (
-                            <div key={j} className={`spv-asg${a.type === "text" ? " txt" : ""}`}>{a.type === "route" ? (a.label || "route") : a.text}</div>
+                            <div key={j} className={`spv-asg${a.type === "text" ? " txt" : a.role === "server" ? " srv" : ""}`}>
+                              {a.type === "route" ? `${a.role === "server" ? "🍽 " : ""}${a.label || "route"}` : a.text}
+                            </div>
                           ))}
                           {day.note && <div className="spv-note">• {day.note}</div>}
                         </td>
