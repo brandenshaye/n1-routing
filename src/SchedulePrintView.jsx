@@ -24,6 +24,7 @@ const CSS = `
 .spv-asg.srv { color: #b45309; }
 .spv-asg.txt { color: #475569; font-weight: 600; }
 .spv-asg .sch { color: #475569; font-weight: 500; }
+.spv-note { color: #b45309; font-size: 11px; font-weight: 600; }
 
 @media screen {
   .spv-scr-bg { background: #64748b; min-height: 100vh; padding: 24px 0 60px; }
@@ -104,6 +105,7 @@ export default function SchedulePrintView({ week, entries, employees, routes = [
                             </div>
                           );
                         })}
+                        {day.note && <div className="spv-note">• {day.note}</div>}
                       </td>
                     );
                   })}
