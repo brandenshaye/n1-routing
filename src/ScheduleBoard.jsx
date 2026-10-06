@@ -23,6 +23,7 @@ export default function ScheduleBoard({ onNavigate }) {
   const [selected, setSelected] = useState(null); // { entryId, dayKey }
   const [newWeekOpen, setNewWeekOpen] = useState(false);
   const [newWeekDate, setNewWeekDate] = useState("");
+  const [copyFromId, setCopyFromId] = useState(""); // which past week "Copy" duplicates
   const [printing, setPrinting] = useState(false);
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [fixOpen, setFixOpen] = useState(null); // fixKey of the issue whose candidate panel is open
@@ -103,8 +104,13 @@ export default function ScheduleBoard({ onNavigate }) {
       const activeEmps = employees.filter(e => e.active);
       let rows = [];
 
-      if (source === "copy" && entries.length > 0) {
-        rows = entries.map((en, i) => {
+      const srcId = copyFromId || weekId;
+      const srcEntries = source === "copy" && srcId
+        ? (srcId === weekId ? entries : await fetchScheduleEntries(srcId))
+        : [];
+
+      if (source === "copy" && srcEntries.length > 0) {
+        rows = srcEntries.map((en, i) => {
           const days = {};
           WEEKDAYS.forEach(d => {
             const src = en.days?.[d.key] || EMPTY_DAY;
@@ -460,7 +466,7 @@ export default function ScheduleBoard({ onNavigate }) {
             {weeks.map(w => <option key={w.id} value={w.id}>{fmtWeekLabel(w.week_start)}</option>)}
             {weeks.length === 0 && <option value="">No weeks yet</option>}
           </select>
-          <button onClick={() => { setNewWeekOpen(true); setNewWeekDate(nextMonday(weeks[0]?.week_start)); }} style={{ background: C.teal, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ New Week</button>
+          <button onClick={() => { setNewWeekOpen(true); setNewWeekDate(nextMonday(weeks[0]?.week_start)); setCopyFromId(weekId || ""); }} style={{ background: C.teal, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ New Week</button>
           {week && <button onClick={openPrint} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.navy }}>🖨 Print / PDF</button>}
           {week && <button onClick={removeWeek} style={{ background: "#fef2f2", border: `1px solid ${C.red}40`, borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: C.red }}>Delete Week</button>}
         </div>
@@ -474,8 +480,16 @@ export default function ScheduleBoard({ onNavigate }) {
             <span style={{ fontSize: 12, color: C.muted }}>Week starting (Monday):</span>
             <input type="date" value={newWeekDate} onChange={e => setNewWeekDate(e.target.value)} style={inp} />
           </div>
+          {weeks.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: C.muted }}>Copy from:</span>
+              <select value={copyFromId} onChange={e => setCopyFromId(e.target.value)} style={{ ...inp, background: "#fff" }}>
+                {weeks.map(w => <option key={w.id} value={w.id}>{fmtWeekLabel(w.week_start)}</option>)}
+              </select>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={() => makeWeek("copy")} disabled={entries.length === 0} style={{ background: C.navy, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: entries.length === 0 ? 0.5 : 1 }}>Copy {week ? fmtWeekLabel(week.week_start) : "current week"}</button>
+            <button onClick={() => makeWeek("copy")} disabled={!copyFromId} style={{ background: C.navy, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: !copyFromId ? 0.5 : 1 }}>Copy {copyFromId ? fmtWeekLabel(weeks.find(w => w.id === copyFromId)?.week_start) : "a week"}</button>
             <button onClick={() => makeWeek("routes")} style={{ background: C.teal, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Generate from routes</button>
             <button onClick={() => makeWeek("blank")} style={{ background: C.light, color: C.navy, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Start blank</button>
             <button onClick={() => setNewWeekOpen(false)} style={{ background: "none", color: C.muted, border: "none", padding: "8px 10px", fontSize: 12, cursor: "pointer" }}>Cancel</button>
