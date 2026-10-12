@@ -66,7 +66,7 @@ export default function SchoolProfiles({ schools, onRefresh, onNavigate }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: C.navy }}>
-                {["School", "Address", "Bkfst Type", "Bkfst Start", "Bkfst End", "Bkfst Svc", "Bkfst Servers", "Lunch Start", "Lunch End", "Lunch Svc", "Lunch Servers", "Temp"].map(h => (
+                {["School", "Address", "Bkfst Type", "Bkfst Start", "Bkfst End", "Bkfst Svc", "Bkfst Servers", "Lunch Start", "Lunch End", "Lunch Svc", "Lunch Servers", "Snack Start", "Snack End", "Snack Svc", "Snack Servers", "Temp"].map(h => (
                   <th key={h} style={{ padding: "8px 10px", textAlign: "left", color: "#cbd5e1", fontWeight: 600, fontSize: 10, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
@@ -75,6 +75,7 @@ export default function SchoolProfiles({ schools, onRefresh, onNavigate }) {
               {filtered.map((s, idx) => {
                 const bk = s.service_windows?.find(w => w.meal_type === "breakfast");
                 const ln = s.service_windows?.find(w => w.meal_type === "lunch");
+                const sn = s.service_windows?.find(w => w.meal_type === "snack");
                 return (
                   <tr key={s.id} onClick={() => openSchool(s)} style={{ borderBottom: `1px solid ${C.border}`, background: idx % 2 === 0 ? C.surface : C.bg, cursor: "pointer" }}
                     onMouseEnter={e => e.currentTarget.style.background = C.light} onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? C.surface : C.bg}>
@@ -89,6 +90,10 @@ export default function SchoolProfiles({ schools, onRefresh, onNavigate }) {
                     <td style={{ padding: "8px 10px", color: C.navy }}>{ln?.window_end || "—"}</td>
                     <td style={{ padding: "8px 10px" }}>{ln ? <TAG color={ln.delivery_type === "served" ? "#2563eb" : C.muted}>{ln.delivery_type === "served" ? "Served" : "Drop"}</TAG> : "—"}</td>
                     <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 600, color: ln?.servers_needed > 0 ? C.navy : C.muted }}>{ln?.servers_needed || "—"}</td>
+                    <td style={{ padding: "8px 10px", color: C.navy, fontWeight: 600 }}>{sn?.window_start || "—"}</td>
+                    <td style={{ padding: "8px 10px", color: C.navy }}>{sn?.window_end || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>{sn ? <TAG color={sn.delivery_type === "served" ? "#db2777" : C.muted}>{sn.delivery_type === "served" ? "Served" : "Drop"}</TAG> : "—"}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 600, color: sn?.servers_needed > 0 ? C.navy : C.muted }}>{sn?.servers_needed || "—"}</td>
                     <td style={{ padding: "8px 10px" }}><TAG color={s.temp_control_pref === "cambro" ? C.amber : s.temp_control_pref === "time-temp" ? C.teal : C.muted}>{s.temp_control_pref}</TAG></td>
                   </tr>
                 );
@@ -126,16 +131,17 @@ export default function SchoolProfiles({ schools, onRefresh, onNavigate }) {
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => addWindow("breakfast")} style={{ background: C.amber + "18", color: C.amber, border: `1px solid ${C.amber}40`, borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ Breakfast</button>
             <button onClick={() => addWindow("lunch")} style={{ background: "#2563eb18", color: "#2563eb", border: "1px solid #2563eb40", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ Lunch</button>
+            <button onClick={() => addWindow("snack")} style={{ background: "#db277718", color: "#db2777", border: "1px solid #db277740", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>+ Snack</button>
           </div>
         </div>
 
-        {["breakfast", "lunch"].map(mt => {
+        {["breakfast", "lunch", "snack"].map(mt => {
           const wins = editWindows.map((w, i) => ({ ...w, _idx: i })).filter(w => w.meal_type === mt);
           if (!wins.length) return null;
-          const mealColor = mt === "breakfast" ? C.amber : "#2563eb";
+          const mealColor = mt === "breakfast" ? C.amber : mt === "snack" ? "#db2777" : "#2563eb";
           return (
             <div key={mt} style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: mealColor, textTransform: "uppercase", marginBottom: 10 }}>{mt === "breakfast" ? "🌅" : "🍽️"} {mt}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: mealColor, textTransform: "uppercase", marginBottom: 10 }}>{mt === "breakfast" ? "🌅" : mt === "snack" ? "🍎" : "🍽️"} {mt}</div>
               {wins.map(w => (
                 <div key={w._idx} style={{ background: C.light, borderRadius: 10, padding: 16, marginBottom: 8, border: `1px solid ${C.border}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>

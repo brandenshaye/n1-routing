@@ -15,6 +15,7 @@ const SERVICE_TAGS = [
   { value: "lunch", label: "LUNCH", color: "#2563eb" },
   { value: "breakfast", label: "BKFST", color: C.amber },
   { value: "da_breakfast", label: "DA BKFST", color: "#92400e" },
+  { value: "snack", label: "SNACK", color: "#db2777" },
 ];
 const SERVE_TYPES = [
   { value: "drop", label: "Drop" },
@@ -202,6 +203,8 @@ export default function RouteBuilder({ schools, onNavigate }) {
     const ln = s.service_windows?.filter(w => w.meal_type === "lunch") || [];
     bk.forEach(b => allServices.push({ schoolName: s.name, svc: b.is_same_day ? "breakfast" : "da_breakfast", win: b, school: s }));
     ln.forEach(l => allServices.push({ schoolName: s.name, svc: "lunch", win: l, school: s }));
+    const sn = s.service_windows?.filter(w => w.meal_type === "snack") || [];
+    sn.forEach(w => allServices.push({ schoolName: s.name, svc: "snack", win: w, school: s }));
   });
   const unassignedSvcs = allServices.filter(a => !assignedKeys.has(`${a.schoolName}|${a.svc}`));
   const filteredSvcs = unassignedSvcs.filter(i => {
@@ -363,6 +366,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
         <TAG color={C.amber}>{unassignedSvcs.filter(i => i.svc === "breakfast").length} bkfst</TAG>
         <TAG color={"#2563eb"}>{unassignedSvcs.filter(i => i.svc === "lunch").length} lunch</TAG>
         <TAG color={"#92400e"}>{unassignedSvcs.filter(i => i.svc === "da_breakfast").length} DA</TAG>
+        <TAG color={"#db2777"}>{unassignedSvcs.filter(i => i.svc === "snack").length} snack</TAG>
       </div>
 
       <div style={{ display: "flex", gap: 16 }}>
@@ -371,7 +375,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
           <div style={{ width: 300, flexShrink: 0 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: "uppercase", marginBottom: 8 }}>Add Service to Route</div>
             <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-              {[{ v: "all", l: "All" }, { v: "breakfast", l: "Bkfst" }, { v: "lunch", l: "Lunch" }, { v: "da_breakfast", l: "DA" }].map(f => (
+              {[{ v: "all", l: "All" }, { v: "breakfast", l: "Bkfst" }, { v: "lunch", l: "Lunch" }, { v: "da_breakfast", l: "DA" }, { v: "snack", l: "Snack" }].map(f => (
                 <button key={f.v} onClick={() => setSearch(f.v)} style={{ background: search === f.v ? C.navy : C.surface, color: search === f.v ? "#fff" : C.muted, border: `1px solid ${search === f.v ? C.navy : C.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{f.l}</button>
               ))}
             </div>
@@ -434,9 +438,11 @@ export default function RouteBuilder({ schools, onNavigate }) {
                     const school = schools.find(s => s.name === stop.schoolName);
                     const bk = school?.service_windows?.filter(w => w.meal_type === "breakfast") || [];
                     const ln = school?.service_windows?.filter(w => w.meal_type === "lunch") || [];
+                    const sn = school?.service_windows?.filter(w => w.meal_type === "snack") || [];
                     const availSvcs = [];
                     if (bk.length > 0) availSvcs.push(bk[0].is_same_day ? "breakfast" : "da_breakfast");
                     if (ln.length > 0) availSvcs.push("lunch");
+                    if (sn.length > 0) availSvcs.push("snack");
                     const untagged = availSvcs.filter(s => !(stop.services || []).includes(s));
 
                     return (
@@ -451,7 +457,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
                             <div style={{ fontWeight: 700, color: C.navy, fontSize: 15, marginBottom: 4 }}>{stop.schoolName}</div>
                             <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>{school?.address}</div>
                             {(stop.services || []).map(svc => {
-                              const t = getSvcTag(svc); const win = svc === "lunch" ? ln[0] : bk[0];
+                              const t = getSvcTag(svc); const win = svc === "lunch" ? ln[0] : svc === "snack" ? sn[0] : bk[0];
                               return (
                                 <div key={svc} style={{ display: "flex", alignItems: "center", gap: 8, background: t.color + "10", padding: "5px 10px", borderRadius: 6, border: `1px solid ${t.color}25`, marginBottom: 4 }}>
                                   <TAG color={t.color}>{t.label}</TAG>

@@ -44,6 +44,7 @@ export default function Dashboard({ schools, onNavigate }) {
     const ln = s.service_windows?.filter(w => w.meal_type === "lunch") || [];
     bk.forEach(b => allServices.push(`${s.name}|${b.is_same_day ? "breakfast" : "da_breakfast"}`));
     ln.forEach(() => allServices.push(`${s.name}|lunch`));
+    s.service_windows?.filter(w => w.meal_type === "snack").forEach(() => allServices.push(`${s.name}|snack`));
   });
   const assignedSvcs = new Set();
   routes.forEach(r => r.stops?.forEach(s => (s.services || []).forEach(svc => assignedSvcs.add(`${s.schoolName}|${svc}`))));

@@ -7,6 +7,7 @@ const SVC = {
   breakfast: { label: "BKFST", color: "#b45309" },
   da_breakfast: { label: "DA BKFST", color: "#7c2d12" },
   lunch: { label: "LUNCH", color: "#1d4ed8" },
+  snack: { label: "SNACK", color: "#be185d" },
 };
 const SERVE = { drop: "Drop", driver_serves: "Driver Serves", dedicated_server: "Dedicated Server", driver_and_server: "Driver + Server" };
 const METHOD = { TT: "Time-Temp", C: "Cambro" };
@@ -198,7 +199,7 @@ function DriverDossier({ route, schools }) {
                 <div className="rpv-kv" style={{ fontWeight: 700 }}>School Service Windows (full profile)</div>
                 {wins.map((w, wi) => (
                   <div key={wi} className="rpv-win">
-                    <span className="wt" style={{ color: w.meal_type === "lunch" ? "#1d4ed8" : "#b45309" }}>
+                    <span className="wt" style={{ color: w.meal_type === "lunch" ? "#1d4ed8" : w.meal_type === "snack" ? "#be185d" : "#b45309" }}>
                       {w.meal_type}{w.service_number ? ` ${w.service_number}` : ""}{w.meal_type === "breakfast" ? (w.is_same_day ? " · Same Day" : " · Day Ahead") : ""}
                     </span>
                     <div>Window {w.window_start || "—"}–{w.window_end || "—"} · {w.delivery_type === "served" ? "Served" : "Drop"}{w.servers_needed > 0 ? ` · ${w.servers_needed} server(s)` : ""}</div>
