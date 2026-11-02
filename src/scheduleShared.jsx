@@ -23,7 +23,24 @@ export function statusInfo(s) { return DAY_STATUSES.find(x => x.value === s) || 
 export const EMPTY_DAY = {
   status: "scheduled", in: "", out: "", actual_in: "", actual_out: "",
   break_min: 0, assignments: [], note: "",
+  highlights: {}, // { in?, out?, note? } -> HIGHLIGHTS key
+  important: {}, // { in?, out?, note? } -> true shows a ❗ after that field
 };
+
+// Highlighter colors leadership can put on a day's In / Out / Note so changes
+// stand out. Background tint + dark text keeps it readable on paper too.
+export const HIGHLIGHTS = [
+  { key: "red", label: "Red", bg: "#fee2e2", fg: "#b91c1c", border: "#f87171" },
+  { key: "orange", label: "Orange", bg: "#ffedd5", fg: "#c2410c", border: "#fb923c" },
+  { key: "yellow", label: "Yellow", bg: "#fef08a", fg: "#713f12", border: "#facc15" },
+  { key: "blue", label: "Blue", bg: "#dbeafe", fg: "#1d4ed8", border: "#60a5fa" },
+  { key: "green", label: "Green", bg: "#dcfce7", fg: "#15803d", border: "#4ade80" },
+];
+export function highlightStyle(key) {
+  const h = HIGHLIGHTS.find(x => x.key === key);
+  if (!h) return null;
+  return { background: h.bg, color: h.fg, boxShadow: `inset 0 0 0 1px ${h.border}`, borderRadius: 3, padding: "0 3px", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" };
+}
 
 export const ROLE_OPTIONS = ["driver", "server"];
 

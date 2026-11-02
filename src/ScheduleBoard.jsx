@@ -8,6 +8,7 @@ import {
   WEEKDAYS, DAY_STATUSES, statusInfo, EMPTY_DAY, TimeInput,
   parseTimeStr, fmtHours, dayPaidHours, weekHours, otHours,
   availabilityWarning, fmtWeekLabel, dayDate, nextMonday,
+  HIGHLIGHTS, highlightStyle,
 } from "./scheduleShared.jsx";
 import SchedulePrintView from "./SchedulePrintView.jsx";
 
@@ -114,7 +115,7 @@ export default function ScheduleBoard({ onNavigate }) {
           const days = {};
           WEEKDAYS.forEach(d => {
             const src = en.days?.[d.key] || EMPTY_DAY;
-            days[d.key] = { ...EMPTY_DAY, ...src, actual_in: "", actual_out: "", status: src.status === "callout" ? "scheduled" : src.status };
+            days[d.key] = { ...EMPTY_DAY, ...src, actual_in: "", actual_out: "", highlights: {}, important: {}, status: src.status === "callout" ? "scheduled" : src.status };
           });
           return { week_id: wk.id, employee_id: en.employee_id, days, sort_order: i };
         });
@@ -352,6 +353,25 @@ export default function ScheduleBoard({ onNavigate }) {
 
   // Day editor panel — rendered as an accordion row directly beneath the
   // clicked employee's row (not below the whole grid, where nobody sees it).
+  const setHighlight = (f, key) => updateDay(selEntry.id, selected.dayKey, { highlights: { ...(selDay.highlights || {}), [f]: key } });
+  const toggleImportant = f => updateDay(selEntry.id, selected.dayKey, { important: { ...(selDay.important || {}), [f]: !selDay.important?.[f] } });
+  const highlightDots = f => {
+    const cur = selDay?.highlights?.[f] || null;
+    const imp = !!selDay?.important?.[f];
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 4 }} title="Highlight this on the schedule">
+        <button onClick={() => setHighlight(f, null)} title="No highlight"
+          style={{ width: 16, height: 16, borderRadius: "50%", background: "#fff", border: `2px solid ${!cur ? C.navy : C.border}`, cursor: "pointer", fontSize: 9, lineHeight: "10px", color: C.muted, padding: 0 }}>∅</button>
+        {HIGHLIGHTS.map(h => (
+          <button key={h.key} onClick={() => setHighlight(f, h.key)} title={`Highlight ${h.label.toLowerCase()}`}
+            style={{ width: 16, height: 16, borderRadius: "50%", background: h.bg, border: `2px solid ${cur === h.key ? C.navy : h.border}`, cursor: "pointer", padding: 0, transform: cur === h.key ? "scale(1.2)" : "none" }} />
+        ))}
+        <button onClick={() => toggleImportant(f)} title={imp ? "Marked important — click to remove ❗" : "Mark important (adds ❗ on the schedule)"}
+          style={{ width: 18, height: 18, borderRadius: 4, marginLeft: 3, background: imp ? C.red : "#fff", border: `1.5px solid ${imp ? C.red : C.red + "60"}`, color: imp ? "#fff" : C.red, cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 900, lineHeight: "14px" }}>!</button>
+      </div>
+    );
+  };
+
   const dayEditorPanel = selEntry && selDay && (
     <div style={{ background: C.surface, borderTop: `2px solid ${C.teal}`, borderBottom: `2px solid ${C.teal}`, padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
@@ -374,8 +394,8 @@ export default function ScheduleBoard({ onNavigate }) {
       {selDay.status !== "off" && selDay.status !== "pto" && (
         <>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 12 }}>
-            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled In</div><TimeInput value={selDay.in} onChange={v => updateDay(selEntry.id, selected.dayKey, { in: v })} /></div>
-            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled Out</div><TimeInput value={selDay.out} onChange={v => updateDay(selEntry.id, selected.dayKey, { out: v })} /></div>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled In</div><TimeInput value={selDay.in} onChange={v => updateDay(selEntry.id, selected.dayKey, { in: v })} />{highlightDots("in")}</div>
+            <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled Out</div><TimeInput value={selDay.out} onChange={v => updateDay(selEntry.id, selected.dayKey, { out: v })} />{highlightDots("out")}</div>
             <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Break (min)</div>
               <input type="number" min="0" step="5" value={selDay.break_min || 0} onChange={e => updateDay(selEntry.id, selected.dayKey, { break_min: parseInt(e.target.value) || 0 })} style={{ ...inp, width: 70 }} />
               <div style={{ fontSize: 9, color: C.muted, marginTop: 2 }}>{(parseInt(selDay.break_min) || 0) >= 30 ? "unpaid (deducted)" : "paid (not deducted)"}</div>
@@ -430,7 +450,7 @@ export default function ScheduleBoard({ onNavigate }) {
               <button onClick={() => setConvertIdx(null)} style={{ background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer", marginLeft: 8 }}>Cancel</button>
             </div>
           )}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
             <select value="" onChange={e => {
               const r = routes.find(x => x.id === e.target.value);
               if (r) updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "route", route_id: r.id, label: r.name, role: defaultRole(selEmp) }] });
@@ -439,7 +459,10 @@ export default function ScheduleBoard({ onNavigate }) {
               {routes.map(r => <option key={r.id} value={r.id}>{r.name}{r.driver_name ? ` (${r.driver_name})` : ""}</option>)}
             </select>
             <AddTextAssignment onAdd={text => updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "text", text }] })} />
-            <input value={selDay.note || ""} onChange={e => updateDay(selEntry.id, selected.dayKey, { note: e.target.value })} placeholder="Day note (e.g. AR 12:30-1)..." style={{ ...inp, flex: "1 1 180px" }} />
+            <div style={{ flex: "1 1 180px", display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <input value={selDay.note || ""} onChange={e => updateDay(selEntry.id, selected.dayKey, { note: e.target.value })} placeholder="Day note (e.g. AR 12:30-1)..." style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+              {highlightDots("note")}
+            </div>
           </div>
         </>
       )}
@@ -635,7 +658,7 @@ export default function ScheduleBoard({ onNavigate }) {
                               ) : (
                                 <>
                                   <div style={{ fontSize: 11, fontWeight: 700, color: C.navy }}>
-                                    {day.in || "—"}–{day.out || "—"}
+                                    <span style={highlightStyle(day.highlights?.in) || undefined}>{day.in || "—"}</span>{day.important?.in && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}–<span style={highlightStyle(day.highlights?.out) || undefined}>{day.out || "—"}</span>{day.important?.out && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}
                                     {warn && <span title={warn} style={{ color: C.red, marginLeft: 3, cursor: "help" }}>⚠</span>}
                                   </div>
                                   {(day.assignments || []).map((a, i) => {
@@ -653,7 +676,7 @@ export default function ScheduleBoard({ onNavigate }) {
                                     );
                                   })}
                                   {day.actual_in && <div style={{ fontSize: 8, color: C.blue }}>act: {day.actual_in}–{day.actual_out || "?"}</div>}
-                                  {day.note && <div style={{ fontSize: 8, color: C.amber }}>• {day.note}</div>}
+                                  {day.note && <div style={{ fontSize: 8, color: C.amber }}><span style={highlightStyle(day.highlights?.note) || undefined}>• {day.note}</span>{day.important?.note && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}</div>}
                                 </>
                               )}
                             </td>

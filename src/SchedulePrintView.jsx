@@ -1,5 +1,5 @@
 import { KITCHEN } from "./config.jsx";
-import { WEEKDAYS, statusInfo, EMPTY_DAY, fmtWeekLabel, dayDate } from "./scheduleShared.jsx";
+import { WEEKDAYS, statusInfo, EMPTY_DAY, fmtWeekLabel, dayDate, highlightStyle } from "./scheduleShared.jsx";
 
 // Distributed schedule per leadership: roster, times, and route assignments
 // per day. No day notes, no hour totals, no OT.
@@ -25,6 +25,7 @@ const CSS = `
 .spv-asg.txt { color: #475569; font-weight: 600; }
 .spv-asg .sch { color: #475569; font-weight: 500; }
 .spv-note { color: #b45309; font-size: 11px; font-weight: 600; }
+.spv-imp { color: #dc2626; font-weight: 900; margin-left: 2px; }
 
 @media screen {
   .spv-scr-bg { background: #64748b; min-height: 100vh; padding: 24px 0 60px; }
@@ -93,7 +94,9 @@ export default function SchedulePrintView({ week, entries, employees, routes = [
                     }
                     return (
                       <td key={d.key}>
-                        <div className="spv-time">{day.in || "—"} – {day.out || "—"}</div>
+                        <div className="spv-time">
+                          <span style={highlightStyle(day.highlights?.in) || undefined}>{day.in || "—"}</span>{day.important?.in && <span className="spv-imp">❗</span>} – <span style={highlightStyle(day.highlights?.out) || undefined}>{day.out || "—"}</span>{day.important?.out && <span className="spv-imp">❗</span>}
+                        </div>
                         {(day.assignments || []).map((a, j) => {
                           if (a.type !== "route") return <div key={j} className="spv-asg txt">{a.text}</div>;
                           const rt = routeById[a.route_id];
@@ -105,7 +108,7 @@ export default function SchedulePrintView({ week, entries, employees, routes = [
                             </div>
                           );
                         })}
-                        {day.note && <div className="spv-note">• {day.note}</div>}
+                        {day.note && <div className="spv-note"><span style={highlightStyle(day.highlights?.note) || undefined}>• {day.note}</span>{day.important?.note && <span className="spv-imp">❗</span>}</div>}
                       </td>
                     );
                   })}
