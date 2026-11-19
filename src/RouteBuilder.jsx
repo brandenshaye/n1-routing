@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { C, TAG, KITCHEN, fetchRoutesFromDB, createRoute, updateRouteDB, deleteRouteDB, deleteAllRoutes } from "./config.jsx";
 import RoutePrintView from "./RoutePrintView.jsx";
+import { useLiveTable, useSaver, mergeRemote, upsertRows } from "./live.jsx";
 
 // ── Constants ────────────────────────────────────────────────
 const ROUTE_TYPES = [
@@ -88,7 +89,7 @@ function TimeInput({ value, onChange }) {
 }
 
 // ── Main Component ───────────────────────────────────────────
-export default function RouteBuilder({ schools, onNavigate }) {
+export default function RouteBuilder({ schools, onNavigate, param, setParam }) {
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
@@ -96,8 +97,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
   const [searchText, setSearchText] = useState("");
   const [saveError, setSaveError] = useState(false);
   const [printView, setPrintView] = useState(null); // { mode: 'all'|'single', routeId? }
-  const saveTimers = useRef(new Map());   // route id -> pending timeout id
-  const pendingSaves = useRef(new Map()); // route id -> () => Promise (latest payload)
+  const initialParam = useRef(param);
 
   // Load routes from Supabase on mount, fallback to localStorage
   useEffect(() => {
@@ -128,6 +128,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
           }
           return merged;
         }));
+        if (initialParam.current && data.some(r => r.id === initialParam.current)) setEditing(initialParam.current);
       } else {
         // Fallback to localStorage
         try { const local = JSON.parse(localStorage.getItem("n1_routes_backup") || "[]"); setRoutes(local); } catch {}
@@ -145,54 +146,47 @@ export default function RouteBuilder({ schools, onNavigate }) {
     if (routes.length > 0) localStorage.setItem("n1_routes_backup", JSON.stringify(routes));
   }, [routes]);
 
-  // Auto-save: debounce writes to Supabase, with ONE pending save PER route so
-  // that editing route B never cancels an unsaved edit to route A.
-  function saveRoute(route) {
+  // Auto-save: debounced per route, sending ONLY the fields that changed so
+  // two people editing different parts of the same route don't overwrite
+  // each other. (Every key here is a real column in routing_routes.)
+  const saver = useSaver((id, patch) => updateRouteDB(id, patch), {
+    onSuccess: () => setSaveError(false),
+    onError: () => setSaveError(true),
+  });
+  function saveRoute(route, fields) {
     if (route._local) return; // Skip Supabase for local-only routes
-    const id = route.id;
-    clearTimeout(saveTimers.current.get(id));
-    // Snapshot the latest payload; a flush persists these newest values.
-    // All of these map to real columns in routing_routes — including
-    // server_names, vans and loading_time, which were previously never saved.
-    pendingSaves.current.set(id, () => updateRouteDB(id, {
-      name: route.name, type: route.type, method: route.method,
-      driver_name: route.driver_name, server_names: route.server_names,
-      departure_time: route.departure_time, return_time: route.return_time,
-      loading_time: route.loading_time, vans: route.vans,
-      notes: route.notes, stops: route.stops, sort_order: route.sort_order,
-    }));
-    saveTimers.current.set(id, setTimeout(() => runSave(id), 500));
+    saver.queue(route.id, fields);
   }
+  const cancelSave = id => saver.cancel(id);
+  const flushSaves = () => saver.flush();
 
-  function runSave(id) {
-    saveTimers.current.delete(id);
-    const fn = pendingSaves.current.get(id);
-    pendingSaves.current.delete(id);
-    if (!fn) return;
-    fn().then(() => setSaveError(false))
-        .catch(e => { console.error("Save failed — NOT persisted to database:", e); setSaveError(true); });
-  }
+  // ── Live updates from other people ─────────────────────────
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  const norm = r => ({ ...r, stops: r.stops || [] });
+  useLiveTable("routing_routes", ({ eventType, new: row, old }) => {
+    if (eventType === "DELETE" || (row && row.active === false)) {
+      const id = old?.id ?? row?.id;
+      cancelSave(id);
+      setRoutes(prev => prev.filter(r => r.id !== id));
+      if (editingRef.current === id) setEditing(null);
+      return;
+    }
+    setRoutes(prev => upsertRows(prev, [norm(row)], id => saver.dirty(id)));
+  }, () => {
+    // Reconnected after a drop: refetch, keeping any unsaved local edits.
+    fetchRoutesFromDB().then(data => {
+      if (!Array.isArray(data)) return;
+      setRoutes(prev => {
+        const local = prev.filter(r => r._local);
+        const byId = new Map(prev.map(r => [r.id, r]));
+        return [...data.map(r => mergeRemote(byId.get(r.id), norm(r), saver.dirty(r.id))), ...local];
+      });
+    }).catch(() => {});
+  });
 
-  // Cancel a route's pending save (e.g. when it's being deleted).
-  function cancelSave(id) {
-    clearTimeout(saveTimers.current.get(id));
-    saveTimers.current.delete(id);
-    pendingSaves.current.delete(id);
-  }
-
-  // Immediately fire every pending save — called before leaving the page so
-  // in-flight edits aren't lost when the component unmounts.
-  function flushSaves() {
-    saveTimers.current.forEach(t => clearTimeout(t));
-    saveTimers.current.clear();
-    const fns = [...pendingSaves.current.values()];
-    pendingSaves.current.clear();
-    fns.forEach(fn => fn().then(() => setSaveError(false))
-      .catch(e => { console.error("Save failed — NOT persisted to database:", e); setSaveError(true); }));
-  }
-
-  // Flush any pending saves when leaving the Route Builder.
-  useEffect(() => () => flushSaves(), []);
+  // Keep the open route in the URL so a refresh reopens it.
+  useEffect(() => { if (!loading) setParam(editing || ""); }, [editing, loading]);
 
   // Coverage
   const assignedKeys = new Set();
@@ -220,7 +214,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
       const result = await createRoute({ name: localRoute.name, type: "lunch_run", method: "TT", driver_name: "", server_names: "", departure_time: "", return_time: "", loading_time: "", vans: [{ number: "", size: "large" }], stops: [], notes: "", sort_order: routes.length });
       const newRoute = Array.isArray(result) ? result[0] : result;
       if (newRoute?.id) {
-        setRoutes(prev => [...prev, { ...newRoute, stops: newRoute.stops || [] }]);
+        setRoutes(prev => upsertRows(prev, [{ ...newRoute, stops: newRoute.stops || [] }]));
         setEditing(newRoute.id);
         return;
       }
@@ -239,9 +233,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
 
   async function clearAll() {
     if (!confirm("Clear ALL routes?") || !confirm("Are you sure? This cannot be undone.")) return;
-    saveTimers.current.forEach(t => clearTimeout(t));
-    saveTimers.current.clear();
-    pendingSaves.current.clear();
+    saver.cancelAll();
     try { await deleteAllRoutes(); } catch {}
     setRoutes([]);
     setEditing(null);
@@ -252,7 +244,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
     setRoutes(prev => {
       const updated = prev.map(r => r.id === id ? { ...r, ...updates } : r);
       const route = updated.find(r => r.id === id);
-      if (route) saveRoute(route);
+      if (route) saveRoute(route, updates);
       return updated;
     });
   }
@@ -265,7 +257,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
         return { ...r, stops: [...r.stops, { schoolName, arriveTime: "", departTime: "", services: [svc], serveType: "drop", serverCount: 0, returnToCK: false, ckReturnTime: "", ckDepartTime: "" }] };
       });
       const route = updated.find(r => r.id === routeId);
-      if (route) saveRoute(route);
+      if (route) saveRoute(route, { stops: route.stops });
       return updated;
     });
   }
@@ -279,7 +271,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
         return { ...r, stops };
       });
       const route = updated.find(r => r.id === routeId);
-      if (route) saveRoute(route);
+      if (route) saveRoute(route, { stops: route.stops });
       return updated;
     });
   }
@@ -288,7 +280,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
     setRoutes(prev => {
       const updated = prev.map(r => r.id !== routeId ? r : { ...r, stops: r.stops.map((s, i) => i !== stopIdx ? s : { ...s, services: (s.services || []).filter(v => v !== svc) }) });
       const route = updated.find(r => r.id === routeId);
-      if (route) saveRoute(route);
+      if (route) saveRoute(route, { stops: route.stops });
       return updated;
     });
   }
@@ -297,7 +289,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
     setRoutes(prev => {
       const updated = prev.map(r => r.id !== routeId ? r : { ...r, stops: r.stops.filter((_, i) => i !== idx) });
       const route = updated.find(r => r.id === routeId);
-      if (route) saveRoute(route);
+      if (route) saveRoute(route, { stops: route.stops });
       return updated;
     });
   }
@@ -306,7 +298,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
     setRoutes(prev => {
       const updated = prev.map(r => r.id !== routeId ? r : { ...r, stops: r.stops.map((s, i) => i === idx ? { ...s, ...u } : s) });
       const route = updated.find(r => r.id === routeId);
-      if (route) saveRoute(route);
+      if (route) saveRoute(route, { stops: route.stops });
       return updated;
     });
   }
@@ -321,7 +313,7 @@ export default function RouteBuilder({ schools, onNavigate }) {
         return { ...r, stops };
       });
       const route = updated.find(r => r.id === routeId);
-      if (route) saveRoute(route);
+      if (route) saveRoute(route, { stops: route.stops });
       return updated;
     });
   }

@@ -1,17 +1,26 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C, TAG, updateSchool, updateServiceWindow, createServiceWindow, deleteServiceWindow, createSchool, deleteSchool } from "./config.jsx";
 
-export default function SchoolProfiles({ schools, onRefresh, onNavigate }) {
-  const [selected, setSelected] = useState(null);
+export default function SchoolProfiles({ schools, onRefresh, onNavigate, param, setParam }) {
+  // A school open in the URL (after a refresh) reopens straight into edit view.
+  const fromUrl = () => schools.find(s => s.id === param) || null;
+  const [selected, setSelected] = useState(() => fromUrl()?.id || null);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
-  const [editSchool, setEditSchool] = useState(null);
-  const [editWindows, setEditWindows] = useState([]);
+  const [editSchool, setEditSchool] = useState(() => (fromUrl() ? { ...fromUrl() } : null));
+  const [editWindows, setEditWindows] = useState(() => fromUrl()?.service_windows?.map(w => ({ ...w })) || []);
+  // What the school looked like when it was opened. Save compares against this
+  // and writes ONLY what this person changed, so someone else's edits made in
+  // the meantime (including newly added service windows) are left alone.
+  const [snapshot, setSnapshot] = useState(() => fromUrl() ? structuredClone(fromUrl()) : null);
+
+  useEffect(() => { setParam(selected || ""); }, [selected]);
 
   function openSchool(school) {
     setSelected(school.id);
     setEditSchool({ ...school });
     setEditWindows(school.service_windows?.map(w => ({ ...w })) || []);
+    setSnapshot(structuredClone(school));
   }
 
   function updateField(f, v) { setEditSchool(prev => ({ ...prev, [f]: v })); }
@@ -31,11 +40,19 @@ export default function SchoolProfiles({ schools, onRefresh, onNavigate }) {
   async function saveSchool() {
     setSaving(true);
     try {
-      await updateSchool(editSchool.id, { name: editSchool.name, address: editSchool.address, access_time: editSchool.access_time, temp_control_pref: editSchool.temp_control_pref });
-      const orig = schools.find(s => s.id === editSchool.id);
+      const changed = (before, after, keys) => Object.fromEntries(keys.filter(k => JSON.stringify(before?.[k]) !== JSON.stringify(after[k])).map(k => [k, after[k]]));
+      const schoolPatch = changed(snapshot, editSchool, ["name", "address", "access_time", "temp_control_pref"]);
+      if (Object.keys(schoolPatch).length) await updateSchool(editSchool.id, schoolPatch);
+      const openedWins = new Map((snapshot.service_windows || []).map(w => [w.id, w]));
       const editIds = new Set(editWindows.filter(w => !w._isNew).map(w => w.id));
-      for (const ow of orig.service_windows) { if (!editIds.has(ow.id)) await deleteServiceWindow(ow.id); }
-      for (const w of editWindows) { const { _isNew, id, created_at, ...data } = w; if (_isNew) await createServiceWindow(data); else await updateServiceWindow(id, data); }
+      // Only delete windows this person removed — not ones someone else added since.
+      for (const id of openedWins.keys()) { if (!editIds.has(id)) await deleteServiceWindow(id); }
+      for (const w of editWindows) {
+        const { _isNew, id, created_at, ...data } = w;
+        if (_isNew) { await createServiceWindow(data); continue; }
+        const patch = changed(openedWins.get(id), data, Object.keys(data));
+        if (Object.keys(patch).length) await updateServiceWindow(id, patch);
+      }
       await onRefresh(); setSelected(null);
     } catch (e) { alert("Save failed: " + e.message); } finally { setSaving(false); }
   }

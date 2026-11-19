@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, Fragment } from "react";
 import {
   C, TAG, fetchEmployees, fetchRoutesFromDB,
   fetchScheduleWeeks, createScheduleWeek, updateScheduleWeek, deleteScheduleWeek,
-  fetchScheduleEntries, createScheduleEntries, updateScheduleEntry, deleteScheduleEntry,
+  fetchScheduleEntries, createScheduleEntries, patchScheduleDays, deleteScheduleEntry,
 } from "./config.jsx";
+import { useLiveTable, useSaver, useDebouncedCallback, mergeRemote, upsertRows, nestPatch } from "./live.jsx";
 import {
   WEEKDAYS, DAY_STATUSES, statusInfo, EMPTY_DAY, TimeInput,
   parseTimeStr, fmtHours, dayPaidHours, weekHours, otHours,
@@ -12,7 +13,7 @@ import {
 } from "./scheduleShared.jsx";
 import SchedulePrintView from "./SchedulePrintView.jsx";
 
-export default function ScheduleBoard({ onNavigate }) {
+export default function ScheduleBoard({ onNavigate, param, setParam }) {
   const [employees, setEmployees] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [weeks, setWeeks] = useState([]);
@@ -29,52 +30,98 @@ export default function ScheduleBoard({ onNavigate }) {
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [fixOpen, setFixOpen] = useState(null); // fixKey of the issue whose candidate panel is open
   const [convertIdx, setConvertIdx] = useState(null); // index of text chip being converted to a route link
-  const saveTimers = useRef(new Map());
-  const pendingSaves = useRef(new Map());
+  const [noteBase, setNoteBase] = useState(null); // { entryId, dayKey, text } — note wording when editing began
+  const initialParam = useRef(param);
+  // Latest values for async callbacks (fetch results, live updates).
+  const weekIdRef = useRef(weekId);
+  weekIdRef.current = weekId;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  useEffect(() => { setNoteBase(null); }, [selected?.entryId, selected?.dayKey]);
 
   const week = weeks.find(w => w.id === weekId);
   const empById = Object.fromEntries(employees.map(e => [e.id, e]));
+
+  // ── Auto-save ──────────────────────────────────────────────
+  // Entry saves send only the edited fields of the edited day (paths like
+  // "days.tue.in"), merged on the server, so two people working on the same
+  // person's week never overwrite each other.
+  const saveHandlers = { onSuccess: () => setSaveError(false), onError: () => setSaveError(true) };
+  const entrySaver = useSaver((id, patch) => patchScheduleDays(id, nestPatch(patch, "days")), saveHandlers);
+  const weekSaver = useSaver((id, patch) => updateScheduleWeek(id, patch), { ...saveHandlers, delay: 600 });
+  function flushSaves() { entrySaver.flush(); weekSaver.flush(); }
+
+  const mergeEntries = (prev, rows) => {
+    const byId = new Map(prev.map(en => [en.id, en]));
+    return rows.map(r => mergeRemote(byId.get(r.id), r, entrySaver.dirty(r.id)));
+  };
+  const mergeWeeks = (prev, rows) => {
+    const byId = new Map(prev.map(w => [w.id, w]));
+    return rows.map(w => mergeRemote(byId.get(w.id), w, weekSaver.dirty(w.id)));
+  };
+  const sortWeeks = list => [...list].sort((a, b) => b.week_start.localeCompare(a.week_start));
+  const sortEntries = list => [...list].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
   // ── Load ───────────────────────────────────────────────────
   useEffect(() => {
     Promise.all([fetchEmployees(), fetchRoutesFromDB(), fetchScheduleWeeks()])
       .then(([emps, rts, wks]) => {
         setEmployees(emps); setRoutes(rts); setWeeks(wks);
-        if (wks.length > 0) setWeekId(wks[0].id);
+        // Reopen the week from the URL (after a refresh), else the newest.
+        const fromUrl = wks.find(w => w.week_start === initialParam.current);
+        if (wks.length > 0) setWeekId((fromUrl || wks[0]).id);
         setLoading(false);
       })
       .catch(e => { console.error(e); setSaveError(true); setLoading(false); });
   }, []);
 
+  function loadEntries(id) {
+    return fetchScheduleEntries(id).then(rows => {
+      if (weekIdRef.current !== id) return; // switched weeks meanwhile
+      setEntries(prev => mergeEntries(prev, rows));
+    });
+  }
   useEffect(() => {
     if (!weekId) { setEntries([]); return; }
     setEntriesLoading(true);
-    fetchScheduleEntries(weekId)
-      .then(rows => { setEntries(rows); setEntriesLoading(false); })
+    loadEntries(weekId)
+      .then(() => setEntriesLoading(false))
       .catch(e => { console.error(e); setSaveError(true); setEntriesLoading(false); });
     setSelected(null);
   }, [weekId]);
 
-  // ── Auto-save (per entry, debounced; mirrors RouteBuilder) ─
-  function persist(entry) {
-    const id = entry.id;
-    clearTimeout(saveTimers.current.get(id));
-    pendingSaves.current.set(id, () => updateScheduleEntry(id, { days: entry.days, sort_order: entry.sort_order }));
-    saveTimers.current.set(id, setTimeout(() => {
-      saveTimers.current.delete(id);
-      const fn = pendingSaves.current.get(id);
-      pendingSaves.current.delete(id);
-      if (fn) fn().then(() => setSaveError(false)).catch(e => { console.error("Schedule save failed:", e); setSaveError(true); });
-    }, 500));
-  }
-  function flushSaves() {
-    saveTimers.current.forEach(t => clearTimeout(t));
-    saveTimers.current.clear();
-    const fns = [...pendingSaves.current.values()];
-    pendingSaves.current.clear();
-    fns.forEach(fn => fn().catch(e => { console.error("Schedule save failed:", e); setSaveError(true); }));
-  }
-  useEffect(() => () => flushSaves(), []);
+  // Keep the viewed week in the URL so a refresh comes back to it.
+  useEffect(() => { if (!loading) setParam(week?.week_start || ""); }, [week?.week_start, loading]);
+
+  // ── Live updates from other people ─────────────────────────
+
+  useLiveTable("routing_schedule_entries", ({ eventType, new: row, old }) => {
+    if (eventType === "DELETE") {
+      setEntries(prev => prev.filter(en => en.id !== old.id));
+      if (selectedRef.current?.entryId === old.id) setSelected(null);
+      return;
+    }
+    if (row.week_id !== weekIdRef.current) return;
+    setEntries(prev => sortEntries(upsertRows(prev, [row], id => entrySaver.dirty(id))));
+  }, () => { if (weekIdRef.current) loadEntries(weekIdRef.current).catch(() => {}); });
+
+  useLiveTable("routing_schedule_weeks", ({ eventType, new: row, old }) => {
+    if (eventType === "DELETE") {
+      setWeeks(prev => {
+        const rest = prev.filter(w => w.id !== old.id);
+        if (weekIdRef.current === old.id) setWeekId(rest[0]?.id || null);
+        return rest;
+      });
+      return;
+    }
+    setWeeks(prev => sortWeeks(upsertRows(prev, [row], id => weekSaver.dirty(id))));
+  }, () => { fetchScheduleWeeks().then(wks => setWeeks(prev => mergeWeeks(prev, wks))).catch(() => {}); });
+
+  // Roster and routes only feed names/labels here — just refetch on change.
+  const refreshEmployees = useDebouncedCallback(() => fetchEmployees().then(setEmployees).catch(() => {}));
+  const refreshRoutes = useDebouncedCallback(() => fetchRoutesFromDB().then(setRoutes).catch(() => {}));
+  useLiveTable("routing_employees", refreshEmployees, refreshEmployees);
+  useLiveTable("routing_routes", refreshRoutes, refreshRoutes);
 
   function updateDay(entryId, dayKey, patch) {
     setEntries(prev => {
@@ -84,8 +131,9 @@ export default function ScheduleBoard({ onNavigate }) {
         days[dayKey] = { ...EMPTY_DAY, ...(days[dayKey] || {}), ...patch };
         return { ...en, days };
       });
-      const en = next.find(x => x.id === entryId);
-      if (en) persist(en);
+      if (next.some(x => x.id === entryId)) {
+        entrySaver.queue(entryId, Object.fromEntries(Object.entries(patch).map(([f, v]) => [`days.${dayKey}.${f}`, v])));
+      }
       return next;
     });
   }
@@ -145,7 +193,7 @@ export default function ScheduleBoard({ onNavigate }) {
       }
 
       const inserted = rows.length ? await createScheduleEntries(rows) : [];
-      setWeeks(prev => [wk, ...prev].sort((a, b) => b.week_start.localeCompare(a.week_start)));
+      setWeeks(prev => sortWeeks(upsertRows(prev, [wk])));
       setWeekId(wk.id);
       setEntries(inserted);
       setNewWeekOpen(false);
@@ -170,7 +218,7 @@ export default function ScheduleBoard({ onNavigate }) {
     if (!missing.length || !weekId) return;
     try {
       const inserted = await createScheduleEntries(missing.map((emp, i) => ({ week_id: weekId, employee_id: emp.id, days: defaultDays(), sort_order: entries.length + i })));
-      setEntries(prev => [...prev, ...inserted]);
+      setEntries(prev => sortEntries(upsertRows(prev, inserted)));
     } catch (e) { console.error(e); setSaveError(true); }
   }
 
@@ -372,6 +420,68 @@ export default function ScheduleBoard({ onNavigate }) {
     );
   };
 
+  // Copy this day's note (with its highlight and ❗) to other days in one click,
+  // instead of retyping it. Clicking a day that already has it removes it there.
+  const noteDays = () => {
+    const note = (selDay?.note || "").trim();
+    if (!note) return null;
+    const dayOf = k => ({ ...EMPTY_DAY, ...(selEntry.days?.[k] || {}) });
+    const canHold = k => !["off", "pto"].includes(dayOf(k).status);
+    const has = k => (dayOf(k).note || "").trim() === note;
+    const put = (k, on) => {
+      const d = dayOf(k);
+      updateDay(selEntry.id, k, on
+        ? { note: selDay.note, highlights: { ...(d.highlights || {}), note: selDay.highlights?.note || null }, important: { ...(d.important || {}), note: !!selDay.important?.note } }
+        : { note: "", highlights: { ...(d.highlights || {}), note: null }, important: { ...(d.important || {}), note: false } });
+    };
+    const others = WEEKDAYS.filter(d => d.key !== selected.dayKey);
+    const allOn = others.filter(d => canHold(d.key)).every(d => has(d.key));
+    const pill = { borderRadius: 999, padding: "2px 9px", fontSize: 10, fontWeight: 700, cursor: "pointer" };
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginRight: 2 }}>Also on</span>
+        {WEEKDAYS.map(d => {
+          if (d.key === selected.dayKey) return <span key={d.key} style={{ ...pill, cursor: "default", background: C.navy, color: "#fff", border: `1px solid ${C.navy}` }}>{d.short}</span>;
+          const ok = canHold(d.key), on = has(d.key);
+          return (
+            <button key={d.key} disabled={!ok} onClick={() => put(d.key, !on)}
+              title={!ok ? `${d.label} is ${statusInfo(dayOf(d.key).status).label} — notes don't show` : on ? `Remove this note from ${d.label}` : `Copy this note to ${d.label}`}
+              style={{ ...pill, background: on ? C.amber + "25" : "#fff", color: !ok ? C.border : on ? "#b45309" : C.muted, border: `1px solid ${on ? C.amber : C.border}`, cursor: ok ? "pointer" : "not-allowed" }}>
+              {on ? "✓ " : ""}{d.short}
+            </button>
+          );
+        })}
+        <button onClick={() => others.filter(d => canHold(d.key)).forEach(d => put(d.key, !allOn))}
+          style={{ ...pill, marginLeft: 4, background: allOn ? C.light : C.amber, color: allOn ? C.muted : "#fff", border: `1px solid ${allOn ? C.border : C.amber}` }}>
+          {allOn ? "Remove from other days" : "All week"}
+        </button>
+      </div>
+    );
+  };
+
+  // After rewording a note, point out other days still showing the old wording
+  // (e.g. copied there earlier with "All week") and offer to update them.
+  const staleNoteNotice = () => {
+    if (!noteBase || noteBase.entryId !== selEntry.id || noteBase.dayKey !== selected.dayKey) return null;
+    const oldText = noteBase.text.trim(), newText = (selDay.note || "").trim();
+    if (!oldText || oldText === newText) return null;
+    const stale = WEEKDAYS.filter(d => d.key !== selected.dayKey && (selEntry.days?.[d.key]?.note || "").trim() === oldText);
+    if (!stale.length) return null;
+    const names = stale.map(d => d.short).join(", ");
+    const btn = { borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" };
+    return (
+      <div style={{ marginTop: 8, background: "#fffbeb", border: `1px solid ${C.amber}`, borderRadius: 8, padding: "7px 10px", fontSize: 12, color: "#92400e", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span>⚠ <b>{names}</b> {stale.length === 1 ? "has" : "have"} the old note</span>
+        <button onClick={() => { stale.forEach(d => updateDay(selEntry.id, d.key, { note: selDay.note })); setNoteBase({ ...noteBase, text: selDay.note || "" }); }}
+          title={`Put the new wording on ${names}`}
+          style={{ ...btn, background: C.amber, color: "#fff", border: "none" }}>Update</button>
+        <button onClick={() => setNoteBase({ ...noteBase, text: selDay.note || "" })}
+          title={`Leave ${names} as they are`}
+          style={{ ...btn, background: "#fff", color: C.muted, border: `1px solid ${C.border}` }}>Keep</button>
+      </div>
+    );
+  };
+
   const dayEditorPanel = selEntry && selDay && (
     <div style={{ background: C.surface, borderTop: `2px solid ${C.teal}`, borderBottom: `2px solid ${C.teal}`, padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
@@ -460,8 +570,12 @@ export default function ScheduleBoard({ onNavigate }) {
             </select>
             <AddTextAssignment onAdd={text => updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "text", text }] })} />
             <div style={{ flex: "1 1 180px", display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              <input value={selDay.note || ""} onChange={e => updateDay(selEntry.id, selected.dayKey, { note: e.target.value })} placeholder="Day note (e.g. AR 12:30-1)..." style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+              <input value={selDay.note || ""}
+                onFocus={() => { if (noteBase?.entryId !== selEntry.id || noteBase?.dayKey !== selected.dayKey) setNoteBase({ entryId: selEntry.id, dayKey: selected.dayKey, text: selDay.note || "" }); }}
+                onChange={e => updateDay(selEntry.id, selected.dayKey, { note: e.target.value })} placeholder="Day note (e.g. AR 12:30-1)..." style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
               {highlightDots("note")}
+              {noteDays()}
+              {staleNoteNotice()}
             </div>
           </div>
         </>
@@ -528,8 +642,7 @@ export default function ScheduleBoard({ onNavigate }) {
               onChange={e => {
                 const banner_note = e.target.value;
                 setWeeks(prev => prev.map(w => w.id === week.id ? { ...w, banner_note } : w));
-                clearTimeout(saveTimers.current.get("banner"));
-                saveTimers.current.set("banner", setTimeout(() => updateScheduleWeek(week.id, { banner_note }).catch(() => setSaveError(true)), 600));
+                weekSaver.queue(week.id, { banner_note });
               }}
               style={{ ...inp, flex: "1 1 300px", fontWeight: 600, color: C.navy }} />
             {missingCount > 0 && (

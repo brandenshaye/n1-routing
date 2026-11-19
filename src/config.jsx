@@ -225,6 +225,16 @@ export async function updateScheduleEntry(id, updates) {
   await sbCheck(res, "updateScheduleEntry");
 }
 
+// Merge a partial days patch ({ tue: { in: "6:00 AM" } }) into one entry on the
+// server, so only the edited fields change (see migration 20261119120000).
+export async function patchScheduleDays(id, days) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/patch_schedule_days`, {
+    method: "POST", headers: sbHeaders,
+    body: JSON.stringify({ p_entry_id: id, p_days: days }),
+  });
+  await sbCheck(res, "patchScheduleDays");
+}
+
 export async function deleteScheduleEntry(id) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/routing_schedule_entries?id=eq.${id}`, { method: "DELETE", headers: sbHeaders });
   await sbCheck(res, "deleteScheduleEntry");

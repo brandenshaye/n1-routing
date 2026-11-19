@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { C, fetchSchoolsFromDB } from "./config.jsx";
+import { useHashRoute, useLiveTable, useDebouncedCallback, LiveBadge } from "./live.jsx";
 import Dashboard from "./Dashboard.jsx";
 import SchoolProfiles from "./SchoolProfiles.jsx";
 import RouteBuilder from "./RouteBuilder.jsx";
@@ -7,7 +8,7 @@ import EmployeeRoster from "./EmployeeRoster.jsx";
 import ScheduleBoard from "./ScheduleBoard.jsx";
 
 export default function App() {
-  const [page, setPage] = useState("dashboard");
+  const { page, param, navigate, setParam } = useHashRoute();
   const [schools, setSchools] = useState([]);
   const [dbLoading, setDbLoading] = useState(true);
   const [dbError, setDbError] = useState(null);
@@ -24,6 +25,12 @@ export default function App() {
 
   useEffect(() => { loadSchools(); }, []);
 
+  // Schools and their service windows are shared by several screens — any
+  // change from anyone just triggers a refetch.
+  const refreshSchools = useDebouncedCallback(loadSchools, 300);
+  useLiveTable("routing_schools", refreshSchools, refreshSchools);
+  useLiveTable("routing_service_windows", refreshSchools, refreshSchools);
+
   if (dbLoading) return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: C.bg, minHeight: "100vh", padding: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ fontSize: 15, color: C.muted }}>Loading school profiles...</div>
@@ -38,13 +45,16 @@ export default function App() {
     </div>
   );
 
+  const nav = p => navigate(p);
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: C.bg, minHeight: "100vh", padding: 24, maxWidth: 1400, margin: "0 auto" }}>
-      {page === "dashboard" && <Dashboard schools={schools} onNavigate={setPage} />}
-      {page === "profiles" && <SchoolProfiles schools={schools} onRefresh={loadSchools} onNavigate={setPage} />}
-      {page === "builder" && <RouteBuilder schools={schools} onNavigate={setPage} />}
-      {page === "roster" && <EmployeeRoster onNavigate={setPage} />}
-      {page === "schedule" && <ScheduleBoard onNavigate={setPage} />}
+      <style>{`@media print { .live-badge { display: none !important; } }`}</style>
+      {page === "dashboard" && <Dashboard schools={schools} onNavigate={nav} />}
+      {page === "profiles" && <SchoolProfiles schools={schools} onRefresh={loadSchools} onNavigate={nav} param={param} setParam={setParam} />}
+      {page === "builder" && <RouteBuilder schools={schools} onNavigate={nav} param={param} setParam={setParam} />}
+      {page === "roster" && <EmployeeRoster onNavigate={nav} param={param} setParam={setParam} />}
+      {page === "schedule" && <ScheduleBoard onNavigate={nav} param={param} setParam={setParam} />}
+      <LiveBadge />
     </div>
   );
 }

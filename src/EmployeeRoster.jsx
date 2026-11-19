@@ -1,51 +1,44 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { C, TAG, fetchEmployees, createEmployee, updateEmployee, deleteEmployee } from "./config.jsx";
 import { WEEKDAYS, ROLE_OPTIONS, TimeInput } from "./scheduleShared.jsx";
+import { useLiveTable, useSaver, mergeRemote, upsertRows } from "./live.jsx";
 
-export default function EmployeeRoster({ onNavigate }) {
+export default function EmployeeRoster({ onNavigate, param, setParam }) {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState(false);
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState(null);
+  const [expanded, setExpanded] = useState(param || null);
   const [showInactive, setShowInactive] = useState(false);
-  const saveTimers = useRef(new Map());
-  const pendingSaves = useRef(new Map());
 
-  useEffect(() => {
-    fetchEmployees().then(data => { setEmployees(data); setLoading(false); })
-      .catch(() => { setSaveError(true); setLoading(false); });
-  }, []);
+  // Field-level auto-save: only the fields someone changed are sent.
+  const saver = useSaver((id, patch) => updateEmployee(id, patch), {
+    onSuccess: () => setSaveError(false),
+    onError: () => setSaveError(true),
+  });
+  const flushSaves = () => saver.flush();
 
-  function persist(emp) {
-    const id = emp.id;
-    clearTimeout(saveTimers.current.get(id));
-    pendingSaves.current.set(id, () => updateEmployee(id, {
-      name: emp.name, title: emp.title, roles: emp.roles, availability: emp.availability,
-      notes: emp.notes, contact: emp.contact, active: emp.active, sort_order: emp.sort_order,
-    }));
-    saveTimers.current.set(id, setTimeout(() => {
-      saveTimers.current.delete(id);
-      const fn = pendingSaves.current.get(id);
-      pendingSaves.current.delete(id);
-      if (fn) fn().then(() => setSaveError(false)).catch(e => { console.error("Employee save failed:", e); setSaveError(true); });
-    }, 500));
+  function loadEmployees() {
+    return fetchEmployees().then(data => {
+      setEmployees(prev => { const byId = new Map(prev.map(e => [e.id, e])); return data.map(e => mergeRemote(byId.get(e.id), e, saver.dirty(e.id))); });
+      setLoading(false);
+    });
   }
+  useEffect(() => { loadEmployees().catch(() => { setSaveError(true); setLoading(false); }); }, []);
 
-  function flushSaves() {
-    saveTimers.current.forEach(t => clearTimeout(t));
-    saveTimers.current.clear();
-    const fns = [...pendingSaves.current.values()];
-    pendingSaves.current.clear();
-    fns.forEach(fn => fn().catch(e => { console.error("Employee save failed:", e); setSaveError(true); }));
-  }
-  useEffect(() => () => flushSaves(), []);
+  // Live updates from other people.
+  useLiveTable("routing_employees", ({ eventType, new: row, old }) => {
+    if (eventType === "DELETE") { setEmployees(prev => prev.filter(e => e.id !== old.id)); return; }
+    setEmployees(prev => upsertRows(prev, [row], id => saver.dirty(id)));
+  }, () => { loadEmployees().catch(() => {}); });
+
+  // Keep the expanded employee in the URL so a refresh reopens it.
+  useEffect(() => { setParam(expanded || ""); }, [expanded]);
 
   function updateLocal(id, updates) {
     setEmployees(prev => {
       const next = prev.map(e => e.id === id ? { ...e, ...updates } : e);
-      const emp = next.find(e => e.id === id);
-      if (emp) persist(emp);
+      if (next.some(e => e.id === id)) saver.queue(id, updates);
       return next;
     });
   }
@@ -54,7 +47,7 @@ export default function EmployeeRoster({ onNavigate }) {
     try {
       const rows = await createEmployee({ name: "New Employee", title: "", roles: ["driver"], availability: {}, notes: "", contact: "", active: true, sort_order: employees.length });
       const emp = Array.isArray(rows) ? rows[0] : rows;
-      setEmployees(prev => [...prev, emp]);
+      setEmployees(prev => upsertRows(prev, [emp]));
       setExpanded(emp.id);
     } catch (e) { console.error(e); setSaveError(true); }
   }

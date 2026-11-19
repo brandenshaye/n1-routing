@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { C, KITCHEN, fetchRoutesFromDB } from "./config.jsx";
+import { useLiveTable, useDebouncedCallback } from "./live.jsx";
 
 export default function Dashboard({ schools, onNavigate }) {
   const [routes, setRoutes] = useState([]);
 
-  useEffect(() => {
+  function loadRoutes() {
     fetchRoutesFromDB().then(data => {
       if (Array.isArray(data) && data.length > 0) {
         setRoutes(data);
@@ -14,7 +15,10 @@ export default function Dashboard({ schools, onNavigate }) {
     }).catch(() => {
       try { setRoutes(JSON.parse(localStorage.getItem("n1_routes_backup") || "[]")); } catch { setRoutes([]); }
     });
-  }, []);
+  }
+  useEffect(() => { loadRoutes(); }, []);
+  const refreshRoutes = useDebouncedCallback(loadRoutes, 300);
+  useLiveTable("routing_routes", refreshRoutes, refreshRoutes);
 
   const served = schools.filter(s => s.service_windows?.some(w => w.delivery_type === "served")).length;
   const drop = schools.filter(s => s.service_windows?.every(w => w.delivery_type === "drop")).length;
