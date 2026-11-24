@@ -766,14 +766,16 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
                           return (
                             <td key={d.key} onClick={() => { setConvertIdx(null); setSelected(isSel ? null : { entryId: en.id, dayKey: d.key }); }}
                               style={{ padding: "5px 6px", cursor: "pointer", verticalAlign: "top", minWidth: 118, outline: isSel ? `2px solid ${C.teal}` : "none", outlineOffset: -2, borderRadius: isSel ? 6 : 0 }}>
-                              {day.status !== "scheduled" ? (
-                                <span style={{ fontSize: 10, fontWeight: 800, color: si.color }}>{si.label}</span>
-                              ) : (
+                              {day.status !== "scheduled" && (
+                                <div style={{ fontSize: 10, fontWeight: 800, color: si.color }}>{si.label}</div>
+                              )}
+                              {/* Scheduled and on-call days show their times/assignments; every status shows its note. */}
+                              {(day.status === "scheduled" || day.status === "on_call") && (
                                 <>
-                                  <div style={{ fontSize: 11, fontWeight: 700, color: C.navy }}>
+                                  {(day.status === "scheduled" || day.in || day.out) && <div style={{ fontSize: 11, fontWeight: 700, color: C.navy }}>
                                     <span style={highlightStyle(day.highlights?.in) || undefined}>{day.in || "—"}</span>{day.important?.in && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}–<span style={highlightStyle(day.highlights?.out) || undefined}>{day.out || "—"}</span>{day.important?.out && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}
                                     {warn && <span title={warn} style={{ color: C.red, marginLeft: 3, cursor: "help" }}>⚠</span>}
-                                  </div>
+                                  </div>}
                                   {(day.assignments || []).map((a, i) => {
                                     const dss = a.type === "route" && a.role !== "server" ? driverServeSchools(a.route_id) : [];
                                     const rt = a.type === "route" ? routes.find(x => x.id === a.route_id) : null;
@@ -789,9 +791,9 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
                                     );
                                   })}
                                   {day.actual_in && <div style={{ fontSize: 8, color: C.blue }}>act: {day.actual_in}–{day.actual_out || "?"}</div>}
-                                  {day.note && <div style={{ fontSize: 8, color: C.amber }}><span style={highlightStyle(day.highlights?.note) || undefined}>• {day.note}</span>{day.important?.note && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}</div>}
                                 </>
                               )}
+                              {day.note && <div style={{ fontSize: 8, color: C.amber }}><span style={highlightStyle(day.highlights?.note) || undefined}>• {day.note}</span>{day.important?.note && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}</div>}
                             </td>
                           );
                         })}

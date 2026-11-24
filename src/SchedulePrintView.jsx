@@ -89,15 +89,15 @@ export default function SchedulePrintView({ week, entries, employees, routes = [
                   {WEEKDAYS.map(d => {
                     const day = { ...EMPTY_DAY, ...(en.days?.[d.key] || {}) };
                     const si = statusInfo(day.status);
-                    if (day.status !== "scheduled") {
-                      return <td key={d.key}><span className="spv-status" style={{ color: si.color }}>{si.label}</span></td>;
-                    }
+                    // Scheduled and on-call days list times/assignments; every status shows its note.
+                    const working = day.status === "scheduled" || day.status === "on_call";
                     return (
                       <td key={d.key}>
-                        <div className="spv-time">
+                        {day.status !== "scheduled" && <div className="spv-status" style={{ color: si.color }}>{si.label}</div>}
+                        {working && (day.status === "scheduled" || day.in || day.out) && <div className="spv-time">
                           <span style={highlightStyle(day.highlights?.in) || undefined}>{day.in || "—"}</span>{day.important?.in && <span className="spv-imp">❗</span>} – <span style={highlightStyle(day.highlights?.out) || undefined}>{day.out || "—"}</span>{day.important?.out && <span className="spv-imp">❗</span>}
-                        </div>
-                        {(day.assignments || []).map((a, j) => {
+                        </div>}
+                        {working && (day.assignments || []).map((a, j) => {
                           if (a.type !== "route") return <div key={j} className="spv-asg txt">{a.text}</div>;
                           const rt = routeById[a.route_id];
                           const schools = (rt?.stops || []).map(s => s.schoolName).join(", ");

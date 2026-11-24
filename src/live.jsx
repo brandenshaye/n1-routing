@@ -125,6 +125,12 @@ export function upsertRows(prev, rows, dirtyFor) {
 }
 
 // ── Debounced field-level saver ─────────────────────────────
+const activeSavers = new Set();
+// Save everything queued on every open screen (e.g. before reloading the page).
+export function flushAllSaves() {
+  return Promise.allSettled([...activeSavers].map(s => s.flush()));
+}
+
 // queue(key, { "field": value, "days.tue.in": value }) collects changes per
 // record; after `delay` ms of quiet, save(key, patch) is called with just the
 // changed paths. dirty(key) lists paths not yet confirmed saved.
@@ -133,10 +139,10 @@ export function useSaver(save, { delay = 500, onSuccess, onError } = {}) {
   const okRef = useRef(onSuccess);
   const errRef = useRef(onError);
   saveRef.current = save; okRef.current = onSuccess; errRef.current = onError;
-  const st = useRef({ pending: new Map(), timers: new Map(), inflight: new Map() });
+  const st = useRef({ pending: new Map(), timers: new Map(), inflight: new Map(), running: new Set() });
 
   const saver = useMemo(() => {
-    const { pending, timers, inflight } = st.current;
+    const { pending, timers, inflight, running } = st.current;
     function fire(key) {
       clearTimeout(timers.get(key));
       timers.delete(key);
@@ -146,7 +152,7 @@ export function useSaver(save, { delay = 500, onSuccess, onError } = {}) {
       const paths = new Set(Object.keys(patch));
       if (!inflight.has(key)) inflight.set(key, []);
       inflight.get(key).push(paths);
-      Promise.resolve()
+      const p = Promise.resolve()
         .then(() => saveRef.current(key, patch))
         .then(() => okRef.current?.(), e => { console.error("Save failed — NOT persisted to database:", e); errRef.current?.(e); })
         .finally(() => {
@@ -155,6 +161,8 @@ export function useSaver(save, { delay = 500, onSuccess, onError } = {}) {
           if (i >= 0) list.splice(i, 1);
           if (!list.length) inflight.delete(key);
         });
+      running.add(p);
+      p.finally(() => running.delete(p));
     }
     return {
       queue(key, patch) {
@@ -162,7 +170,8 @@ export function useSaver(save, { delay = 500, onSuccess, onError } = {}) {
         clearTimeout(timers.get(key));
         timers.set(key, setTimeout(() => fire(key), delay));
       },
-      flush() { [...pending.keys()].forEach(fire); },
+      // Fire everything queued; resolves once all saves (incl. in-flight) settle.
+      flush() { [...pending.keys()].forEach(fire); return Promise.allSettled([...running]); },
       cancel(key) { clearTimeout(timers.get(key)); timers.delete(key); pending.delete(key); },
       cancelAll() { timers.forEach(t => clearTimeout(t)); timers.clear(); pending.clear(); },
       dirty(key) {
@@ -174,7 +183,10 @@ export function useSaver(save, { delay = 500, onSuccess, onError } = {}) {
   }, [delay]);
 
   // Save anything still queued when the screen closes.
-  useEffect(() => () => saver.flush(), [saver]);
+  useEffect(() => {
+    activeSavers.add(saver);
+    return () => { activeSavers.delete(saver); saver.flush(); };
+  }, [saver]);
   return saver;
 }
 
@@ -186,6 +198,47 @@ export function nestPatch(patch, prefix) {
     if (p.startsWith(prefix + ".")) out = setPath(out, p.slice(prefix.length + 1), v);
   });
   return out;
+}
+
+// ── New-version notice ──────────────────────────────────────
+// Each production build ships version.json with its build id (see
+// vite.config.js). Open tabs check it every few minutes and whenever the tab
+// comes back into view; if it differs, offer a one-click refresh.
+const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
+export function UpdateBadge() {
+  const [available, setAvailable] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!import.meta.env.PROD) return;
+    let stopped = false;
+    const check = () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      fetch(`/version.json?t=${Date.now()}`, { cache: "no-store" })
+        .then(r => (r.ok ? r.json() : null))
+        .then(v => { if (!stopped && v?.buildId && v.buildId !== BUILD_ID) setAvailable(true); })
+        .catch(() => {});
+    };
+    const timer = setInterval(check, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", check);
+    check();
+    return () => { stopped = true; clearInterval(timer); document.removeEventListener("visibilitychange", check); };
+  }, []);
+  if (!available) return null;
+  const refresh = async () => {
+    setBusy(true);
+    await Promise.race([flushAllSaves(), new Promise(r => setTimeout(r, 4000))]); // don't lose a just-typed edit
+    window.location.reload();
+  };
+  return (
+    <div className="live-badge" role="status"
+      style={{ position: "fixed", right: 14, bottom: 48, zIndex: 51, display: "flex", alignItems: "center", gap: 10, background: "#0f2744", color: "#fff", borderRadius: 10, padding: "8px 8px 8px 14px", fontSize: 12, fontWeight: 600, boxShadow: "0 6px 20px rgba(0,0,0,.25)" }}>
+      ✨ New version available
+      <button onClick={refresh} disabled={busy}
+        style={{ background: "#0d9488", color: "#fff", border: "none", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 800, cursor: busy ? "default" : "pointer", opacity: busy ? 0.7 : 1 }}>
+        {busy ? "Saving…" : "Refresh"}
+      </button>
+    </div>
+  );
 }
 
 // ── URL-based navigation ────────────────────────────────────

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { C, fetchSchoolsFromDB } from "./config.jsx";
-import { useHashRoute, useLiveTable, useDebouncedCallback, LiveBadge } from "./live.jsx";
+import { useHashRoute, useLiveTable, useDebouncedCallback, LiveBadge, UpdateBadge } from "./live.jsx";
 import Dashboard from "./Dashboard.jsx";
 import SchoolProfiles from "./SchoolProfiles.jsx";
 import RouteBuilder from "./RouteBuilder.jsx";
@@ -55,6 +55,7 @@ export default function App() {
       {page === "roster" && <EmployeeRoster onNavigate={nav} param={param} setParam={setParam} />}
       {page === "schedule" && <ScheduleBoard onNavigate={nav} param={param} setParam={setParam} />}
       <LiveBadge />
+      <UpdateBadge />
     </div>
   );
 }
