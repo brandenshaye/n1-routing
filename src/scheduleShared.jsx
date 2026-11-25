@@ -65,7 +65,9 @@ export function fmtHours(h) {
 // shorter breaks stay paid, so they are not deducted.
 export function dayPaidHours(day) {
   if (!day) return 0;
-  if (day.status === "off" || day.status === "pto" || day.status === "callout") return 0;
+  // Only Scheduled days are paid; On Call = not working unless called in
+  // (any leftover times are kept but ignored until switched back to Scheduled).
+  if ((day.status || "scheduled") !== "scheduled") return 0;
   const start = parseTimeStr(day.in), end = parseTimeStr(day.out);
   if (start === null || end === null || end <= start) return 0;
   let mins = end - start;

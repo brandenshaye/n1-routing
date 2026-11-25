@@ -242,7 +242,7 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
     const serversOn = {}; // route_id -> [names] with role server
     entries.forEach(en => {
       const day = en.days?.[d.key];
-      if (!day || day.status === "off" || day.status === "pto" || day.status === "callout") return;
+      if (!day || (day.status && day.status !== "scheduled")) return; // only Scheduled days cover routes
       (day.assignments || []).forEach(a => {
         if (a.type === "route" && a.route_id) {
           const bucket = a.role === "server" ? serversOn : driversOn;
@@ -299,7 +299,7 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
     if (!emp) return;
     WEEKDAYS.forEach(d => {
       const day = { ...EMPTY_DAY, ...(en.days?.[d.key] || {}) };
-      if (day.status !== "scheduled" && day.status !== "on_call") return;
+      if (day.status !== "scheduled") return;
       const target = { entryId: en.id, dayKey: d.key };
       const noTimes = !day.in || !day.out;
       const noAssign = (day.assignments || []).length === 0;
@@ -358,7 +358,7 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
     return entries.map(en => {
       const emp = empById[en.employee_id];
       const day = { ...EMPTY_DAY, ...(en.days?.[dayKey] || {}) };
-      if (!emp || ["off", "pto", "callout"].includes(day.status)) return null;
+      if (!emp || day.status !== "scheduled") return null;
       if ((day.assignments || []).some(a => a.type === "route" && a.route_id === routeId)) return null;
       let score = (emp.roles || []).includes(role) ? 2 : 0;
       let bestChip = -1, bestChipScore = 0;
@@ -501,8 +501,12 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
         ))}
       </div>
 
+      {selDay.status === "on_call" && (
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>On call — no hours or routes are shown or counted. Switch to Scheduled if they're called in.</div>
+      )}
       {selDay.status !== "off" && selDay.status !== "pto" && (
         <>
+          {selDay.status !== "on_call" && <>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 12 }}>
             <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled In</div><TimeInput value={selDay.in} onChange={v => updateDay(selEntry.id, selected.dayKey, { in: v })} />{highlightDots("in")}</div>
             <div><div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 3 }}>Scheduled Out</div><TimeInput value={selDay.out} onChange={v => updateDay(selEntry.id, selected.dayKey, { out: v })} />{highlightDots("out")}</div>
@@ -560,7 +564,9 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
               <button onClick={() => setConvertIdx(null)} style={{ background: "none", border: "none", color: C.muted, fontSize: 11, cursor: "pointer", marginLeft: 8 }}>Cancel</button>
             </div>
           )}
+          </>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+            {selDay.status !== "on_call" && <>
             <select value="" onChange={e => {
               const r = routes.find(x => x.id === e.target.value);
               if (r) updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "route", route_id: r.id, label: r.name, role: defaultRole(selEmp) }] });
@@ -569,6 +575,7 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
               {routes.map(r => <option key={r.id} value={r.id}>{r.name}{r.driver_name ? ` (${r.driver_name})` : ""}</option>)}
             </select>
             <AddTextAssignment onAdd={text => updateDay(selEntry.id, selected.dayKey, { assignments: [...(selDay.assignments || []), { type: "text", text }] })} />
+            </>}
             <div style={{ flex: "1 1 180px", display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <input value={selDay.note || ""}
                 onFocus={() => { if (noteBase?.entryId !== selEntry.id || noteBase?.dayKey !== selected.dayKey) setNoteBase({ entryId: selEntry.id, dayKey: selected.dayKey, text: selDay.note || "" }); }}
@@ -769,13 +776,13 @@ export default function ScheduleBoard({ onNavigate, param, setParam }) {
                               {day.status !== "scheduled" && (
                                 <div style={{ fontSize: 10, fontWeight: 800, color: si.color }}>{si.label}</div>
                               )}
-                              {/* Scheduled and on-call days show their times/assignments; every status shows its note. */}
-                              {(day.status === "scheduled" || day.status === "on_call") && (
+                              {/* Only Scheduled days show times/assignments; every status shows its note. */}
+                              {day.status === "scheduled" && (
                                 <>
-                                  {(day.status === "scheduled" || day.in || day.out) && <div style={{ fontSize: 11, fontWeight: 700, color: C.navy }}>
+                                  <div style={{ fontSize: 11, fontWeight: 700, color: C.navy }}>
                                     <span style={highlightStyle(day.highlights?.in) || undefined}>{day.in || "—"}</span>{day.important?.in && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}–<span style={highlightStyle(day.highlights?.out) || undefined}>{day.out || "—"}</span>{day.important?.out && <span title="Important" style={{ color: C.red, fontWeight: 900 }}>❗</span>}
                                     {warn && <span title={warn} style={{ color: C.red, marginLeft: 3, cursor: "help" }}>⚠</span>}
-                                  </div>}
+                                  </div>
                                   {(day.assignments || []).map((a, i) => {
                                     const dss = a.type === "route" && a.role !== "server" ? driverServeSchools(a.route_id) : [];
                                     const rt = a.type === "route" ? routes.find(x => x.id === a.route_id) : null;

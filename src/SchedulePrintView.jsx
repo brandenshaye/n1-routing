@@ -89,12 +89,12 @@ export default function SchedulePrintView({ week, entries, employees, routes = [
                   {WEEKDAYS.map(d => {
                     const day = { ...EMPTY_DAY, ...(en.days?.[d.key] || {}) };
                     const si = statusInfo(day.status);
-                    // Scheduled and on-call days list times/assignments; every status shows its note.
-                    const working = day.status === "scheduled" || day.status === "on_call";
+                    // Only Scheduled days list times/assignments; every status shows its note.
+                    const working = day.status === "scheduled";
                     return (
                       <td key={d.key}>
                         {day.status !== "scheduled" && <div className="spv-status" style={{ color: si.color }}>{si.label}</div>}
-                        {working && (day.status === "scheduled" || day.in || day.out) && <div className="spv-time">
+                        {working && <div className="spv-time">
                           <span style={highlightStyle(day.highlights?.in) || undefined}>{day.in || "—"}</span>{day.important?.in && <span className="spv-imp">❗</span>} – <span style={highlightStyle(day.highlights?.out) || undefined}>{day.out || "—"}</span>{day.important?.out && <span className="spv-imp">❗</span>}
                         </div>}
                         {working && (day.assignments || []).map((a, j) => {
